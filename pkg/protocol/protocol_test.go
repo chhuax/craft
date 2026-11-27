@@ -1,0 +1,53 @@
+package protocol
+
+import (
+	"bytes"
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func TestJSONRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		wire   string
+		target any
+	}{
+		{"事件", `{"id":"e1","source":"demo","event":"item.changed","threads":[{"source":"demo","kind":"item","id":"41"}],"actor":{"source":"demo","id":"a","name":"林"},"human":true,"addressed":"mention","at":"2025-01-01T00:00:00.000Z","text":"请看","channel":{"source":"demo","thread":"41","room":{"id":9007199254740995}},"url":"https://example.org/41","meta":{"n":9007199254740993}}`, &Trigger{}},
+		{"可空与可选字段", `{"id":"e2","source":"demo","event":"item.closed","threads":[{"source":"demo","kind":"item","id":"41"}],"actor":{"source":"demo","id":"a"},"human":false,"addressed":null,"at":"2025-01-01T00:00:00.000Z","text":"","meta":{}}`, &Trigger{}},
+		{"结构化地址", `{"source":"demo","thread":{"kind":"conversation","id":"42"},"messageId":"3"}`, &ChannelRef{}},
+		{"数字请求标识", `{"jsonrpc":"2.0","id":9007199254740993,"method":"initialize","params":{"protocol":1}}`, &Request{}},
+		{"字符串请求标识", `{"jsonrpc":"2.0","id":"x","method":"shutdown"}`, &Request{}},
+		{"通知", `{"jsonrpc":"2.0","method":"$/cancel","params":{"id":"x"}}`, &Notification{}},
+		{"无参通知", `{"jsonrpc":"2.0","method":"shutdown"}`, &Notification{}},
+		{"成功响应", `{"jsonrpc":"2.0","id":"x","result":{"ok":true}}`, &Response{}},
+		{"空结果", `{"jsonrpc":"2.0","id":9007199254740993,"result":null}`, &Response{}},
+		{"错误响应", `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"解析错误","data":{"offset":1}}}`, &Response{}},
+		{"无详情错误", `{"code":-32601,"message":"方法不存在"}`, &Error{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := json.Unmarshal([]byte(tc.wire), tc.target); err != nil {
+				t.Fatal(err)
+			}
+			output, err := json.Marshal(tc.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got, want any
+			decoder := json.NewDecoder(bytes.NewReader(output))
+			decoder.UseNumber()
+			if err := decoder.Decode(&got); err != nil {
+				t.Fatal(err)
+			}
+			decoder = json.NewDecoder(strings.NewReader(tc.wire))
+			decoder.UseNumber()
+			if err := decoder.Decode(&want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("往返后得到 %s；期望 %s", output, tc.wire)
+			}
+		})
+	}
+}
