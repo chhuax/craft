@@ -1,19 +1,53 @@
 # craft
 
-> 项目名暂定，见 `docs/open-questions.md` Q1b。
-
-craft 是一个本地优先的「事件 → 任务 → 执行」编排内核：
+craft 是一个本地优先的「事件 → 工作 → 执行」编排框架。Watch 通过闹钟和 inbox 接收变化，把工作交给执行方并跟进结果。method 帮助执行方把工作整理成可验证的变更，outbound 根据后果决定何时需要人确认对外写。
 
 - 外部系统（工单、代码托管、CI、部署……）的变化被翻译成统一的**事件**（Trigger）；
 - 内核按**订阅**把事件分发给在办的工作（Work），没人认领的事件进入**研判**，决定接不接；
 - 接下的工作交给**执行方**（本地 AI 编码助手会话、其他 agent、人）去做，内核跟进到对象关闭；
 - 任何对外写操作按**后果分级确认**，人答了才做。
 
-内核不认识任何具体外部系统。工单、GitLab、GitHub、部署平台都是**进程外扩展**，通过 JSON-RPC 与内核对话。
+外部系统由**进程外扩展**接入，扩展经 JSON-RPC 2.0 over stdio 与内核对话。
 
 ## 状态
 
-规格阶段（v1 草案）。先冻结规格，再写代码。入口：
+当前提供可编译的 CLI 骨架、时间与标识辅助函数，以及公开协议类型。CLI 支持 `craft version` 和 `craft --help`。
+
+## 安装
+
+尚未发布。要在本机试用 CLI，可从源码构建。
+
+## 开发
+
+使用 [go.mod](go.mod) 指定的 Go 版本，在仓库根目录运行以下命令。
+
+```sh
+make build
+go run ./cmd/craft version
+make test
+go vet ./...
+make fmt
+make lint
+```
+
+`make build` 将二进制写入 `bin/`。`make lint` 使用 golangci-lint v2。开发环境与提交约定见[贡献指南](CONTRIBUTING.md)。
+
+## 目录结构
+
+| 目录 | 职责 |
+|---|---|
+| `cmd/craft/`、`internal/cli/` | 进程入口、命令解析与输出 |
+| `internal/engine/`、`internal/store/` | 纯领域规则与 SQLite 仓储边界 |
+| `internal/alarm/`、`internal/app/` | 闹钟与运行层，调度 inbox、Pass 和 effect |
+| `internal/exthost/`、`internal/outbound/` | 管理扩展子进程与对外写确认 |
+| `internal/method/` | 可独立运行的方法层 |
+| `internal/boundary/` | 标准库依赖与词表守门测试 |
+| `pkg/protocol/` | 扩展与内核共享的 JSON 类型 |
+| `extensions/`、`hosts/` | 参考扩展与宿主薄包 |
+| `tools/` | 仓库词表与将来的宿主打包工具 |
+| `docs/` | 规格、架构决策与路线图 |
+
+## 文档索引
 
 | 文档 | 内容 |
 |---|---|
