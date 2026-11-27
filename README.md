@@ -5,7 +5,7 @@ craft 是一个本地优先的「事件 → 工作 → 执行」编排框架。W
 - 外部系统（工单、代码托管、CI、部署……）的变化被翻译成统一的**事件**（Trigger）；
 - 内核按**订阅**把事件分发给在办的工作（Work），没人认领的事件进入**研判**，决定接不接；
 - 接下的工作交给**执行方**（本地 AI 编码助手会话、其他 agent、人）去做，内核跟进到对象关闭；
-- 任何对外写操作按**后果分级确认**，人答了才做。
+- 对外写操作按后果分级。可撤回且不涉及交接的操作可自动执行，需要确认的操作先向人展示预览。
 
 外部系统由**进程外扩展**接入，扩展经 JSON-RPC 2.0 over stdio 与内核对话。
 
@@ -13,9 +13,22 @@ craft 是一个本地优先的「事件 → 工作 → 执行」编排框架。W
 
 当前提供可编译的 CLI 骨架、时间与标识辅助函数，以及公开协议类型。CLI 支持 `craft version` 和 `craft --help`。
 
-## 安装
+## 快速开始
 
-尚未发布。要在本机试用 CLI，可从源码构建。
+当前从源码运行。安装 Git 和 [go.mod](go.mod) 指定的 Go 工具链后，在终端执行以下命令。
+
+```sh
+git clone https://github.com/chhuax/craft.git
+cd craft
+go run ./cmd/craft --help
+go run ./cmd/craft version --json
+```
+
+从源码运行时，版本字段为 `dev`。最后一条命令的输出如下。
+
+```json
+{"evidence":[],"ok":true,"payload":{"version":"dev"}}
+```
 
 ## 开发
 
@@ -66,4 +79,4 @@ make lint
 
 ## 许可证
 
-Apache-2.0，见 `LICENSE`。
+craft 采用 [Apache License 2.0](LICENSE)。第三方声明见 [NOTICE](NOTICE)。
