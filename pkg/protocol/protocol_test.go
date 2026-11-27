@@ -8,6 +8,35 @@ import (
 	"testing"
 )
 
+func TestOmitOptionalNull(t *testing.T) {
+	for _, tc := range []struct {
+		name, wire, field string
+		target            any
+	}{
+		{"请求参数", `{"jsonrpc":"2.0","id":1,"method":"shutdown","params":null}`, "params", &Request{}},
+		{"通知参数", `{"jsonrpc":"2.0","method":"ready","params":null}`, "params", &Notification{}},
+		{"错误详情", `{"code":-32601,"message":"方法不存在","data":null}`, "data", &Error{}},
+		{"显示名", `{"source":"demo","id":"a","name":null}`, "name", &ActorRef{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := json.Unmarshal([]byte(tc.wire), tc.target); err != nil {
+				t.Fatal(err)
+			}
+			wire, err := json.Marshal(tc.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(wire, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := fields[tc.field]; ok {
+				t.Errorf("可选字段 %s 为 null 时应省略：%s", tc.field, wire)
+			}
+		})
+	}
+}
+
 func TestJSONRoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
