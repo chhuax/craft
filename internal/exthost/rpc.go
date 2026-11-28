@@ -181,6 +181,17 @@ func (c *Conn) writeLoop() {
 	}
 }
 
+// Notify 将单向通知加入同一写队列；返回成功只表示已排队，不能用作送达确认。
+func (c *Conn) Notify(ctx context.Context, method string, params any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.send(outboundRequest{JSONRPC: protocol.JSONRPCVersion, Method: method, Params: params})
+}
+
+// Done 在传输断开时关闭，使进程拥有者可以立即回收仍未退出的后代。
+func (c *Conn) Done() <-chan struct{} { return c.ctx.Done() }
+
 // Call 发起请求并将成功响应解码到 result；传 nil 可只等待完成。超时由 ctx 控制。
 func (c *Conn) Call(ctx context.Context, method string, params, result any) error {
 	return c.call(ctx, method, params, result, false)
