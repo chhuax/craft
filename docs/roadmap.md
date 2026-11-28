@@ -14,7 +14,7 @@
 | M5 outbound | 分级、预览、`--yes`、outbox、回执、`action/verify`、内容检查 | 各级别流程测试 |
 | M6 参考扩展与宿主薄包 | `extensions/github`；首发宿主薄包：Claude Code 与 Codex（skill markdown + 调用说明）；宿主能力放各自包的 manifest | 真实宿主冒烟：一条 PR 事件走完 |
 | M6b method | `internal/method`（标准库，不导入内核）：模板与文档检查、确认（内容哈希）、验证证据与代码快照、任务进度（按提交识别）、变更说明投影、现状文档合并；method 执行手册与示例库 | K3：只装 craft + git，从一段需求文本走到本地提交与变更说明 |
-| M7 发布 | 按 ADR 0004 产出「宿主 × 系统」包矩阵（`tools/package/`：编译、渲染入口模板、归档、校验和）；上传 GitHub Releases；CONTRIBUTING、文档站 | `v0.1.0`，10 个包与 `checksums.txt` |
+| M7 发布 | 按 ADR 0004 产出**一个**通用的包（`tools/package/`：编译五个系统的二进制、放进 `bin/`、复制两个宿主的清单与 skill、校验）；提交到分发仓库并打 tag；goreleaser 同时发布各系统二进制到 GitHub Releases；CONTRIBUTING、文档站 | `v0.1.0`：一个包，Claude Code 与 Codex 各自一条命令装上并跑通 |
 
 ## 行为用例来源
 
@@ -64,7 +64,7 @@
 ## 开源基础设施
 
 - 许可证 Apache-2.0；`NOTICE` 登记第三方与原型的版权声明。
-- 构建与发布按 ADR 0004：goreleaser 产出各系统二进制，`tools/package/` 渲染宿主模板并归档成「宿主 × 系统」包，上传 GitHub Releases。
+- 构建与发布按 ADR 0004：goreleaser 产出各系统二进制，`tools/package/` 把它们与两个宿主的清单、skill 组装成一个通用的包，提交到分发仓库并打 tag。
 - CI：单元测试、引擎守门（仅标准库）、词表扫描、协议一致性测试、跨平台冒烟。
 - 治理：`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、`SECURITY.md`、issue/PR 模板。
 - 文档语言：规格先用中文定稿，M7 前补英文版并以英文为准对外。
