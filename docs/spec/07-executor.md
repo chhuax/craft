@@ -32,7 +32,7 @@ Preparer { prepare(target, work) -> PreparedTarget }
 launch({workId, assignmentId}):
   work = 读; a = latest assignment
   work 不存在/已结束/work.delivery 非空/a.id != assignmentId/a.state != pending → 直接返回（不报错）
-  target 为空 → 返回（等人指定，不是错误）
+  target 为空 → launchFailed("没有执行目标")   # 不得静默返回：Work 会永远停在 queued，界面上看不出原因
   该 Work 有未完成的 stop effect → 抛 Later（先等旧会话停下）
   slots.reserve(workId, "launch")            # 没空槽 → Later
   try:    launchImpl(work, a)
@@ -58,6 +58,8 @@ launchImpl(work, a):
 ```
 
 - `launchFailed`：调 `engine.report(failed, summary, assignmentId)`，由面板展示。
+- **执行目标（v1）**：v1 没有选址（选址放 v1.1），所以 **accept 建 Work 时，没有预设目标的一律设为 `scratch` 目标**（`TargetSnapshot{kind: "scratch", selectedBy: "default"}`，`evidence` 写明「v1 无选址，默认在临时目录执行」），不论来源是人的请求还是扩展的事件。Preparer 为它创建 `<状态目录>/scratch/<workId>`（权限 0700、不在任何代码仓库里、已存在则复用、**绝不删除非空目录**），会话在该目录里启动。这与 03 §1 事件目录里 `no_target: "scratch"` 的含义一致；该字段在 v1 是冗余的。临时目录的清理归 `prune`。把 Work 落到某个仓库的 worktree 是 v1.1 的选址。
+- 因此 launch 看到空的 `Execution.Target` 只会出现在损坏或旧数据里，必须报告失败而不是等待。
 - 短暂错误（宿主 `UNAVAILABLE`，或网络、限流、5xx）最多重试 3 次（含首次共 4 次），超过记失败。
 - **git 之类的目标准备必须由 Preparer 完成**，且要先走宿主的目录规划（有些宿主对工作目录有命名或位置要求）；不得绕过规划直接用默认路径。
 
