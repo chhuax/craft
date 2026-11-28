@@ -156,3 +156,30 @@ func TestEffectRejectedPayload(t *testing.T) {
 		t.Fatalf("拒绝后队列仍受影响 %+v", got)
 	}
 }
+
+// 入队时间必须来自注入的时钟：假时钟早于真实时间时，新入队的行也要在该时刻到期，
+// 否则依赖假时钟的调度测试永远等不到「已到期」。
+func TestEnqueueUsesInjectedClock(t *testing.T) {
+	ctx := t.Context()
+	at := time.Date(2001, 2, 3, 4, 5, 6, 789_000_000, time.UTC)
+	db, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "clock.db"), nil, WithClock(func() time.Time { return at }))
+	requireStoreOK(t, err)
+	t.Cleanup(func() { requireStoreOK(t, db.Close()) })
+	requireStoreOK(t, db.Write(ctx, func(tx *SQLiteTx) error {
+		return tx.Enqueue("delivery", "one", json.RawMessage("1"))
+	}))
+	got := head(t, db)
+	if want := "2001-02-03T04:05:06.789Z"; got.Due != want || got.Since != want {
+		t.Fatalf("due=%s since=%s，期望都是注入时钟的 %s", got.Due, got.Since, want)
+	}
+	requireStoreOK(t, db.View(ctx, func(r SQLiteReader) error {
+		early, err := r.DueEffects("delivery", at.Add(-time.Millisecond), 10)
+		requireStoreOK(t, err)
+		onTime, err := r.DueEffects("delivery", at, 10)
+		requireStoreOK(t, err)
+		if len(early) != 0 || len(onTime) != 1 {
+			t.Fatalf("到期判断：早 1ms 取到 %d 行，准点取到 %d 行", len(early), len(onTime))
+		}
+		return nil
+	}))
+}

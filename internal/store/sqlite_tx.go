@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // SQLiteReader 只在当前回调内使用，文档和索引共享同一快照。
@@ -17,6 +18,7 @@ type SQLiteReader struct {
 type SQLiteTx struct {
 	SQLiteReader
 	callbacks
+	now func() time.Time
 }
 
 // Read 从独立只读连接开始事务，同一回调的多次查询共享快照。
@@ -55,6 +57,7 @@ func (s *SQLite) Write(ctx context.Context, fn func(*SQLiteTx) error) error {
 		}
 		return transact(tx, func(tx *sql.Tx) error {
 			write.SQLiteReader = SQLiteReader{ctx, tx}
+			write.now = s.now
 			return fn(&write)
 		})
 	})
@@ -110,7 +113,7 @@ func (t *SQLiteTx) Savepoint(ctx context.Context, fn func(*SQLiteTx) error) (err
 		}
 	}()
 
-	child := SQLiteTx{SQLiteReader: SQLiteReader{ctx, t.tx}}
+	child := SQLiteTx{SQLiteReader: SQLiteReader{ctx, t.tx}, now: t.now}
 	if err := fn(&child); err != nil {
 		return fmt.Errorf("执行保存点事务: %w", err)
 	}

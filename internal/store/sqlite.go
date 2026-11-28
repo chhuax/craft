@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/chhuax/craft/internal/store/migrate"
 	_ "modernc.org/sqlite"
@@ -21,11 +22,21 @@ type SQLite struct {
 	writing chan struct{}
 	reader  *sql.DB
 	logger  *slog.Logger
+	now     func() time.Time
+}
+
+// Option 调整 OpenSQLite 的可注入行为。
+type Option func(*SQLite)
+
+// WithClock 注入存储层用来给队列行打时间的时钟。effect 的 due 与 since 由存储写入，
+// 如果它们读的是数据库所在机器的系统时钟，而调度读取用的是注入时钟，测试里就无法确定地拨动时间。
+func WithClock(now func() time.Time) Option {
+	return func(s *SQLite) { s.now = now }
 }
 
 // OpenSQLite 打开或创建本地文件并在返回前完成迁移。WAL 依赖本机锁与共享内存，
 // 不支持网络盘。调用方负责 Close，logger 为 nil 时使用 slog 默认日志。
-func OpenSQLite(ctx context.Context, path string, logger *slog.Logger) (_ *SQLite, err error) {
+func OpenSQLite(ctx context.Context, path string, logger *slog.Logger, opts ...Option) (_ *SQLite, err error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("解析数据库路径 %q: %w", path, err)
@@ -48,7 +59,10 @@ func OpenSQLite(ctx context.Context, path string, logger *slog.Logger) (_ *SQLit
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &SQLite{writeDB: writeDB, writing: make(chan struct{}, 1), logger: logger}
+	s := &SQLite{writeDB: writeDB, writing: make(chan struct{}, 1), logger: logger, now: time.Now}
+	for _, opt := range opts {
+		opt(s)
+	}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, s.Close())

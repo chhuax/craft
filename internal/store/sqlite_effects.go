@@ -35,7 +35,7 @@ func (t *SQLiteTx) Enqueue(kind, key string, value json.RawMessage) error {
 		return fmt.Errorf("effect %s[%q] 的负载不是有效 JSON", kind, key)
 	}
 	const query = `INSERT INTO watch_effect(kind,key,value,seq,generation,attempts,due,since)
-		VALUES (?,?,?,?,1,0,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		VALUES (?,?,?,?,1,0,?,?)
 		ON CONFLICT(kind,key) DO UPDATE SET value=excluded.value,generation=generation+1,
 		attempts=0,error=NULL,due=excluded.due`
 	// SQLite 对 JSON 深度还有额外限制。即使调用方捕获入队错误也不能只提交计数器。
@@ -44,7 +44,9 @@ func (t *SQLiteTx) Enqueue(kind, key string, value json.RawMessage) error {
 		if err != nil {
 			return err
 		}
-		if _, err := child.tx.ExecContext(child.ctx, query, kind, key, string(value), seq); err != nil {
+		// 时间来自注入的时钟而不是 SQLite 的 'now'，见 WithClock。
+		at := child.now().UTC().Format(milliseconds)
+		if _, err := child.tx.ExecContext(child.ctx, query, kind, key, string(value), seq, at, at); err != nil {
 			return fmt.Errorf("入队 %s[%q]: %w", kind, key, err)
 		}
 		return nil
