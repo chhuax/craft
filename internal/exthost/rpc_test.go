@@ -113,9 +113,11 @@ func TestCancelCallWhileWriteBlocked(t *testing.T) {
 func TestInbound(t *testing.T) {
 	canceled := make(chan struct{})
 	notice := make(chan struct{})
+	started := make(chan struct{})
 	p := wire(t, func(ctx context.Context, method string, raw json.RawMessage) (any, error) {
 		switch method {
 		case "block":
+			close(started)
 			<-ctx.Done()
 			close(canceled)
 			return nil, ctx.Err()
@@ -135,6 +137,9 @@ func TestInbound(t *testing.T) {
 	p.send(t, `{"jsonrpc":"2.0","id":"slow","method":"block"}`)
 	p.send(t, `{"jsonrpc":"2.0","method":"event"}`)
 	<-notice
+	// 每个请求在自己的 goroutine 里处理：收到 event 并不代表 block 已经开始运行。
+	// 若取消先于它开始，连接按设计跳过已取消请求的处理函数，close(canceled) 就永远不会执行。
+	<-started
 	p.send(t, `{"jsonrpc":"2.0","method":"$/cancel","params":{"id":"slow"}}`)
 	<-canceled
 	var r protocol.Response
