@@ -28,8 +28,17 @@ func Discover(dirs ...string) Result {
 	r := Result{Rejected: map[string]error{}}
 	all := r.scan(dirs)
 	ids := map[string][]string{}
+	sources := map[string][]string{}
 	for _, e := range all {
 		ids[e.Manifest.ID] = append(ids[e.Manifest.ID], e.ManifestPath)
+		// 权限按扩展归属。同一文件内重复列出来源不构成跨扩展争用。
+		seen := map[string]bool{}
+		for _, src := range e.Manifest.WatchSources {
+			if !seen[src.ID] {
+				sources[src.ID] = append(sources[src.ID], e.ManifestPath)
+				seen[src.ID] = true
+			}
+		}
 	}
 	r.rejectConflicts("id", ids)
 	candidates := map[string]Extension{}
@@ -49,11 +58,12 @@ func Discover(dirs ...string) Result {
 		}
 	}
 	r.rejectConflicts("watch_sources.events", events)
-	// 已拓扑排序，只需向后传播一次事件冲突导致的拒绝。
+	r.rejectConflicts("watch_sources.id", sources)
+	// 已拓扑排序，只需向后传播一次来源或事件冲突导致的拒绝。
 	for _, e := range ordered {
 		for _, id := range e.Manifest.Requires {
 			if r.Rejected[candidates[id].ManifestPath] != nil {
-				r.Rejected[e.ManifestPath] = fmt.Errorf("%s: requires %q 已拒绝", e.ManifestPath, id)
+				r.Rejected[e.ManifestPath] = errors.Join(r.Rejected[e.ManifestPath], fmt.Errorf("%s: requires %q 已拒绝", e.ManifestPath, id))
 				break
 			}
 		}
@@ -111,7 +121,7 @@ func (r Result) rejectConflicts(field string, keys map[string][]string) {
 		}
 		err := fmt.Errorf("%s 重复 %q (%s)", field, key, strings.Join(paths, ", "))
 		for _, p := range paths {
-			r.Rejected[p] = err
+			r.Rejected[p] = errors.Join(r.Rejected[p], err)
 		}
 	}
 }

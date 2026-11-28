@@ -259,3 +259,38 @@ func TestDiscoverMixedDependencyErrors(t *testing.T) {
 		t.Fatalf("装载 %v，拒绝 %v", r.Extensions, r.Rejected)
 	}
 }
+
+func TestDiscoverSourceOwners(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		second string
+		want   []string
+	}{
+		{"不同扩展争用", "shared", []string{"independent"}},
+		{"一个扩展声明多个来源", "another", []string{"first", "dependent", "independent", "second"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			first := putManifest(t, root, "first", manifestText("first", `,"watch_sources":[{"id":"shared"},{"id":"other"}]`))
+			second := putManifest(t, root, "second", manifestText("second", fmt.Sprintf(`,"watch_sources":[{"id":%q}]`, tc.second)))
+			dep := putManifest(t, root, "dependent", manifestText("dependent", `,"requires":["first"]`))
+			putManifest(t, root, "independent", manifestText("independent", ""))
+			result := Discover(root)
+			var ids []string
+			for _, e := range result.Extensions {
+				ids = append(ids, e.Manifest.ID)
+			}
+			if !slices.Equal(ids, tc.want) {
+				t.Fatalf("装载 %v，期望 %v；拒绝 %v", ids, tc.want, result.Rejected)
+			}
+			if tc.second == "shared" {
+				for p, other := range map[string]string{first: "second", second: "first", dep: "first"} {
+					err := result.Rejected[p]
+					if err == nil || !strings.Contains(err.Error(), other) || (p != dep && !strings.Contains(err.Error(), "shared")) {
+						t.Errorf("%s 拒绝原因 %v", p, err)
+					}
+				}
+			}
+		})
+	}
+}
