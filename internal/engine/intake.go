@@ -50,6 +50,9 @@ func (e *Engine) receive(u Unit, tr Trigger, policy Policy) (ReceiveResult, erro
 	if old != nil {
 		return Duplicate, nil
 	}
+	if tr.Source == "craft" && tr.Event == "person.answer" {
+		return "", errors.New("人的回答须由 Answer 定向投递")
+	}
 	if e.cfg.Scope == nil {
 		return "", errors.New("接收 Trigger 需要 SourceScope")
 	}

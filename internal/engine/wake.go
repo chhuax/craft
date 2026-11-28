@@ -8,7 +8,7 @@ import (
 // wake 只登记投递请求，供 Intake 和 Works 在保存 Work 的同一写事务内调用。
 // 调用方传入本事务已读且已更新的聚合，避免重读；入队失败必须传回以撤销整条命令。
 func wake(u Unit, w *Work) error {
-	if len(w.Undelivered) == 0 {
+	if len(w.Undelivered) == 0 || w.Delivery != nil || w.Mandate.Basis.Via == ViaHumanDirect {
 		return nil
 	}
 	payload, err := jsontext.AppendQuote([]byte(`{"workId":`), w.ID)

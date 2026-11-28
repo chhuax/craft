@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"slices"
-	"strconv"
 )
 
 // StopWork 记录人的停止决定。重试保留第一次的结束事实和停止请求。
@@ -28,9 +26,13 @@ func endWork(u Unit, w *Work, end WorkEnd, threads map[string]*Thread, now strin
 	}
 	w.Ended = &end
 	w.UpdatedAt = now
+	if err := withdrawQuestion(u, w.Attention); err != nil {
+		return err
+	}
 	w.Attention = nil
 	w.Delivery = nil
 	w.Undelivered = nil
+	w.DeliveryBatch = nil
 	var running []string
 	for i := range w.Assignments {
 		a := &w.Assignments[i]
@@ -117,23 +119,10 @@ func (e *Engine) RetryWork(ctx context.Context, workID string) (Work, error) {
 		if old.Report == nil || (old.Report.State != Blocked && old.Report.State != Failed) || answeredSince(w, old.Report.At) {
 			return &UserError{Code: CodeNotRetryable}
 		}
-		// 首轮启动也可能在登记会话后失败，替换它之前同样需要先停。
-		stop := old.State == AssignmentRunning || w.Execution != nil && w.Execution.Session != nil
-		old.State = AssignmentEnded
-		old.EndedAt = now
-		old.EndedReason = "retried"
-		if err := emitEvent(u, "assignment.ended", now, map[string]string{"work": w.ID, "assignment": old.ID}, map[string]any{"workId": w.ID, "assignmentId": old.ID, "reason": "retried"}); err != nil {
+		a, err := replaceAssignment(u, w, old, "retried", now)
+		if err != nil {
 			return err
 		}
-		if stop {
-			if err := enqueueStop(u, w, old.ID); err != nil {
-				return err
-			}
-		}
-		requeueUnread(w, old.ID)
-		a := Assignment{ID: Key("assignment", w.ID, strconv.Itoa(len(w.Assignments))), CreatedAt: now, State: AssignmentPending}
-		w.Assignments = append(w.Assignments, a)
-		w.UpdatedAt = now
 		if err := u.PutWork(*w); err != nil {
 			return err
 		}
@@ -158,10 +147,15 @@ func retryDelivery(u Unit, w *Work, old *Assignment, now string) error {
 
 func requeueUnread(w *Work, id string) {
 	// readAt 缺失是旧数据，只有明确未读、且送给被替换派工的输入可以重新投递。
+	queued := make(map[string]bool, len(w.Undelivered))
+	for _, id := range w.Undelivered {
+		queued[id] = true
+	}
 	var unread []string
 	for _, in := range w.Inputs {
-		if in.Kind == "trigger" && in.DeliveredTo == id && in.ReadAt == (ReadTime{Present: true}) && !slices.Contains(w.Undelivered, in.ID) {
+		if in.Kind == "trigger" && in.DeliveredTo == id && in.ReadAt == (ReadTime{Present: true}) && !queued[in.ID] {
 			unread = append(unread, in.ID)
+			queued[in.ID] = true
 		}
 	}
 	w.Undelivered = append(unread, w.Undelivered...)
