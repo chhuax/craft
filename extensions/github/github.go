@@ -96,6 +96,13 @@ func (e *extension) handle(ctx context.Context, method string, raw json.RawMessa
 	return nil, &protocol.Error{Code: -32601, Message: "未知方法"}
 }
 
+// malformedError 表示「某一条上游数据的形状不符合预期」。它只影响这一条：投递循环跳过它并计数，
+// 不能让整轮闹钟失败——否则一条无法识别的通知会让游标永远推不过去，inbox 被它永久卡死。
+// 传输类错误（HTTP 状态、网络、取消、内核拒绝）不是它，照旧让整轮失败并走退避。
+type malformedError string
+
+func (m malformedError) Error() string { return string(m) }
+
 type apiError struct {
 	status     int
 	retry      time.Time

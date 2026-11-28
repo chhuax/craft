@@ -42,7 +42,11 @@ func (i *invocation) write(fn func(*engine.Engine, string) (any, error)) (out re
 		if err != nil {
 			return out, fmt.Errorf("%w: %w", errDependency, err)
 		}
-		scope = kinds
+		// 没有加载到任何对象声明时，等同于没有声明：不能把「未知对象」当作「不可关闭」，
+		// 那会绕开单自有对象互斥（见 TestPolicySetRollsBackWithWork）。仍交给 OpenCommands 按无声明处理。
+		if len(kinds) > 0 {
+			scope = kinds
+		}
 	}
 	c, err := app.OpenCommands(i.ctx, i.home, i.clock, scope)
 	if err != nil {

@@ -80,9 +80,16 @@ func (e *extension) inbox(ctx context.Context) error {
 	return e.save(ctx, "cursor", next)
 }
 
-func (e *extension) deliverNotifications(ctx context.Context, r io.Reader, since time.Time) error {
+func (e *extension) deliverNotifications(ctx context.Context, r io.Reader, since time.Time) (err error) {
 	d := json.NewDecoder(r)
 	var login string
+	skipped := 0
+	// 被跳过的只是形状异常的单条通知，其余照常投递、游标照常推进；数量上报给人看（不含通知内容）。
+	defer func() {
+		if err == nil && skipped > 0 {
+			err = e.report(ctx, "inbox", "ok", fmt.Sprintf("跳过 %d 条无法识别的通知", skipped))
+		}
+	}()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -102,6 +109,10 @@ func (e *extension) deliverNotifications(ctx context.Context, r io.Reader, since
 			}
 		}
 		if err = e.translate(ctx, n, login, since); err != nil {
+			if _, bad := errors.AsType[malformedError](err); bad {
+				skipped++
+				continue
+			}
 			return err
 		}
 	}
@@ -210,7 +221,13 @@ func (e *extension) translate(ctx context.Context, n notification, login string,
 		}
 		u, err := url.Parse(n.Subject.Comment)
 		if err != nil {
-			return errors.New("无效的评论地址")
+			return malformedError("无效的评论地址")
+		}
+		// 真实 GitHub 在「最近一次动作不是评论」（例如 Issue 本身被创建或编辑）时，会把 latest_comment_url
+		// 设成主题自己的地址（/repos/R/issues/N 或 /repos/R/pulls/N）。此时没有评论对象可翻译，不是错误。
+		subject := "/repos/" + o.repo + "/issues/" + strconv.Itoa(o.n)
+		if u.Path == subject || u.Path == "/repos/"+o.repo+"/pulls/"+strconv.Itoa(o.n) {
+			return nil
 		}
 		for _, kind := range []string{"issues", "pulls"} {
 			_, id, ok := strings.Cut(u.Path, "/repos/"+o.repo+"/"+kind+"/comments/")
@@ -223,11 +240,11 @@ func (e *extension) translate(ctx context.Context, n notification, login string,
 				return err
 			}
 			if c.ID != number {
-				return errors.New("评论标识不匹配")
+				return malformedError("评论标识不匹配")
 			}
 			return e.emitComment(ctx, o, c, login, since, n.Reason, kind)
 		}
-		return errors.New("评论地址与通知仓库不匹配")
+		return malformedError("评论地址与通知仓库不匹配")
 	case "ci_activity", "state_change":
 		d, err := e.detail(ctx, o)
 		if err != nil {
@@ -256,12 +273,12 @@ func (e *extension) suiteEvents(ctx context.Context, n notification, login strin
 	}
 	u, err := url.Parse(n.Subject.URL)
 	if err != nil {
-		return errors.New("无效的检查套件地址")
+		return malformedError("无效的检查套件地址")
 	}
 	_, num, ok := strings.Cut(u.Path, "/repos/"+repo+"/check-suites/")
 	id, err := strconv.ParseInt(num, 10, 64)
 	if !ok || err != nil || id <= 0 {
-		return errors.New("检查套件与通知仓库不匹配")
+		return malformedError("检查套件与通知仓库不匹配")
 	}
 	var suite struct {
 		ID  int64
@@ -275,7 +292,7 @@ func (e *extension) suiteEvents(ctx context.Context, n notification, login strin
 		return err
 	}
 	if suite.ID != id {
-		return errors.New("检查套件标识不符")
+		return malformedError("检查套件标识不符")
 	}
 	for _, pr := range suite.PRs {
 		if err := ctx.Err(); err != nil {
@@ -342,7 +359,7 @@ func (e *extension) assignments(ctx context.Context, o object, n notification, l
 		}
 		more, err := linkPage(h, "next")
 		if err != nil || more != 0 && more <= page {
-			return errors.New("对象事件分页无效")
+			return malformedError("对象事件分页无效")
 		}
 		page = more
 	}
@@ -360,7 +377,7 @@ type comment struct {
 
 func (e *extension) emitComment(ctx context.Context, o object, c comment, login string, since time.Time, reason, kind string) error {
 	if c.ID <= 0 || c.Created.IsZero() {
-		return errors.New("评论缺少标识或时间")
+		return malformedError("评论缺少标识或时间")
 	}
 	if c.Created.Before(since) {
 		return nil

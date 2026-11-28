@@ -375,3 +375,57 @@ func TestCheckSuiteAndSubscriptionIdentifySameFailure(t *testing.T) {
 		t.Fatal(inbox, follow)
 	}
 }
+
+// 用真实 GitHub 通知里观察到的形状复现（2026-11-28 联调）：
+//   - reason=comment 的 Issue 通知，latest_comment_url 可以是主题自己的地址（最近一次动作不是评论）；
+//   - 一条形状异常的通知不能让整轮失败，否则游标永远推不过去，inbox 被它永久卡死。
+//
+// 手写 fixture 里 latest_comment_url 永远是评论地址，这两件事离线测试从来没覆盖到。
+func TestRealShapeNotificationsDoNotBlockInbox(t *testing.T) {
+	base := "https://api.github.com/repos/" + repo
+	selfLatest := notice("comment", "Issue", 31)
+	selfLatest["subject"].(map[string]string)["latest_comment_url"] = base + "/issues/31"
+	foreign := notice("comment", "Issue", 32)
+	foreign["subject"].(map[string]string)["latest_comment_url"] = "https://api.github.com/repos/other/place/issues/comments/9"
+	good := notice("comment", "Issue", 34)
+	h := start(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/notifications":
+			sendJSON(w, []any{selfLatest, foreign, good})
+		case "/user":
+			sendJSON(w, map[string]string{"login": "reader"})
+		case "/repos/north/demo/issues/comments/34":
+			writeComment(w, r)
+		default:
+			t.Errorf("意外请求 %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	})
+	if err := h.run("inbox"); err != nil {
+		t.Fatalf("单条异常通知让整轮失败了: %v", err)
+	}
+	ts := h.triggers()
+	if len(ts) != 1 || ts[0].Threads[0].ID != repo+"#34" {
+		t.Fatalf("应当只投递正常的那一条，得到 %d 条", len(ts))
+	}
+	if h.state["cursor"] == nil {
+		t.Fatal("游标没有推进：异常通知会把 inbox 永久卡死")
+	}
+	var detail string
+	for _, c := range h.calls {
+		if c.Method == "health/report" {
+			var p struct{ State, Detail string }
+			must(t, json.Unmarshal(c.Params, &p))
+			if p.State != "ok" {
+				t.Fatalf("跳过个别通知不应报告为错误: %+v", p)
+			}
+			// 整轮结束时还会再报一次不带详情的 ok，所以这里取「带跳过计数的那一次」。
+			if strings.Contains(p.Detail, "跳过") {
+				detail = p.Detail
+			}
+		}
+	}
+	if !strings.Contains(detail, "跳过 1 条") || strings.Contains(detail, "other/place") {
+		t.Fatalf("应报告跳过数量，且不得带出通知内容: %q", detail)
+	}
+}

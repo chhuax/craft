@@ -557,3 +557,29 @@ func TestOutboundNeedsDaemon(t *testing.T) {
 		t.Run(strings.Join(args, " "), func(t *testing.T) { command(t, home, 6, args...) })
 	}
 }
+
+// 真实入口（cmd/craft/main.go）不会注入扩展目录：`watch request` 要核对对象类型是否可关闭时，
+// 必须自己从 <CRAFT_HOME>/extensions 装载声明。此前只有 daemon 与 ext 两组命令会自动装配，
+// 测试又总是手工注入，所以联调时（事件目录非空的库里）`watch request` 在真实二进制里直接失败。
+func TestRequestFindsExtensionsInStateDirWithoutInjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CRAFT_HOME", home)
+	dir := filepath.Join(home, "extensions", "demo")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"id":"demo","protocol":1,"version":"1","exec":["./unused"],"watch_sources":[{"id":"feed","thread_kinds":[{"id":"item","closable":true}],"events":[{"id":"change","default":"observe","strength":"explicit"}]}]}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// 事件目录非空才会触发「必须有对象声明」的核对。
+	db := testDB(t, home)
+	r, err := app.NewRuntime(db, alarm.RealClock{}, app.ObjectKinds{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ApplyPolicy(t.Context(), engine.Settings{}, []engine.EventDef{{Source: "feed", Event: "change", Default: engine.ModeObserve}}); err != nil {
+		t.Fatal(err)
+	}
+	command(t, home, 0, "watch", "request", "feed:item:real")
+}

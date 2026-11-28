@@ -262,7 +262,8 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 		case spec.path != "ext test":
 			i.home, err = app.StateHome(getenv, userHomeDir)
 			group, _, _ := strings.Cut(spec.path, " ")
-			if err == nil && i.extensionDirs == nil && (group == "daemon" || group == "ext") {
+			// watch request / attach 要核对对象类型是否可关闭，也需要扩展声明；真实入口不会注入，要自己装配。
+			if err == nil && i.extensionDirs == nil && (group == "daemon" || group == "ext" || spec.path == "watch request" || spec.path == "watch attach") {
 				i.extensionDirs = app.ExtensionDirs(i.home, getenv("CRAFT_EXTENSIONS"))
 			}
 		}
