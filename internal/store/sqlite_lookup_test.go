@@ -31,6 +31,10 @@ func TestLookupPlans(t *testing.T) {
 	}
 	checkPlan(t, s, getQuery("watch_reply_status"), "INDEX sqlite_autoindex_watch_reply_status_1 (key=?)")
 	checkPlan(t, s, effectByKey, "INDEX sqlite_autoindex_watch_effect_1 (kind=? AND key=?)")
+	checkPlan(t, s, inboxDelete, "INDEX sqlite_autoindex_watch_inbox_1 (id=?)")
+	checkPlan(t, s, getQuery("watch_trigger"), "INDEX sqlite_autoindex_watch_trigger_1 (key=?)")
+	checkPlan(t, s, inboxBatch, "INDEX inbox_order")
+	checkPlan(t, s, inboxHead, "INDEX inbox_order")
 	checkPlan(t, s, effectHead, "INDEX effect_order")
 	checkPlan(t, s, effectDue, "INDEX effect_due")
 }
@@ -54,18 +58,21 @@ func checkPlan(t *testing.T, s *SQLite, query string, indexes ...string) {
 			t.Fatal(err)
 		}
 		steps = append(steps, detail)
+		// 从 seq 索引头部顺读，LIMIT 命中后就停止，无须构造虚假的范围谓词。
+		bounded := (query == inboxBatch || query == inboxHead) && strings.Contains(detail, "INDEX inbox_order")
 		for _, index := range indexes {
-			if strings.HasPrefix(detail, "SEARCH ") && strings.Contains(detail, index) {
+			if (bounded || strings.HasPrefix(detail, "SEARCH ")) && strings.Contains(detail, index) {
 				found[index] = true
 			}
 		}
-		if strings.HasPrefix(detail, "SCAN ") && !strings.Contains(detail, "VIRTUAL TABLE") || strings.Contains(detail, "TEMP B-TREE FOR ORDER BY") {
+		if !bounded && strings.HasPrefix(detail, "SCAN ") && !strings.Contains(detail, "VIRTUAL TABLE") || strings.Contains(detail, "TEMP B-TREE FOR ORDER BY") {
 			t.Errorf("出现全表扫描或额外排序：%s", detail)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("%s: %s", query, strings.Join(steps, " / "))
 	for _, index := range indexes {
 		if !found[index] {
 			t.Errorf("未按 %s 查找：%v", index, steps)

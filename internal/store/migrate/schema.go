@@ -99,6 +99,7 @@ func createV1(tx *sql.Tx) error {
 		`CREATE TABLE watch_inbox (
 			id TEXT PRIMARY KEY, value TEXT NOT NULL, at TEXT NOT NULL, seq INTEGER NOT NULL
 		)`,
+		"CREATE INDEX inbox_order ON watch_inbox(seq)",
 		`CREATE TABLE watch_effect (
 			kind TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL CHECK(json_valid(value)),
 			seq INTEGER NOT NULL, generation INTEGER NOT NULL, attempts INTEGER NOT NULL,
