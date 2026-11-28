@@ -86,6 +86,8 @@ func daemonCommand(t testing.TB, args ...string) map[string]any {
 
 func TestProcessLifecycle(t *testing.T) {
 	home := t.TempDir()
+	// 子进程会消费人工请求的 launch；本用例只用临时目录中的扩展。
+	t.Setenv("PATH", home)
 	t.Setenv("CRAFT_HOME", home)
 	t.Setenv("CRAFT_EXTENSIONS", "")
 	t.Setenv("GORACE", "atexit_sleep_ms=0")

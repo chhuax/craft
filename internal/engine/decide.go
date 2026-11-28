@@ -218,6 +218,11 @@ func (e *Engine) admit(u Unit, th *Thread, ev *Evaluation, out Outcome, p Policy
 		return d, nil, err
 	}
 	w := Work{ID: Key("work", ev.ID), Title: title, Mandate: mandateOf(ev, out), CreatedAt: now, UpdatedAt: now, Origin: Origin{TriggerID: primary.ID, TriggerIDs: ev.TriggerIDs}}
+	target := out.Target
+	if target == nil {
+		target = &TargetSnapshot{ID: "scratch", Kind: "scratch", Title: title, Evidence: []string{"v1 无选址，默认在临时目录执行"}, SelectedBy: "default"}
+	}
+	w.Execution = &Execution{Target: target}
 	batch := make([]*Trigger, 0, len(ev.TriggerIDs))
 	for _, id := range ev.TriggerIDs {
 		tr := triggers[id]

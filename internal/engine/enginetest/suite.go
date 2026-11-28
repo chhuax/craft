@@ -54,6 +54,7 @@ func Run(t *testing.T, factory func(t *testing.T) engine.Store) {
 		{"接单核对命中规则", admissionRules},
 		{"独立研判事务", independentEvals},
 		{"接单与回滚", decideAccept},
+		{"接单保留预设目标", presetTarget},
 		{"研判决策", decisionModes},
 		{"跟进归属与停止决策", workerDecides},
 		{"自有对象互斥", ownExclusion},

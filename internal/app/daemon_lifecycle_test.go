@@ -198,6 +198,8 @@ func installTestManifest(t *testing.T, root, id, src string, major int, executab
 func TestDaemonEndToEnd(t *testing.T) {
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	root := t.TempDir()
+	// 接单已有可启动的目标；扩展生命周期测试不能发现本机的真实宿主。
+	t.Setenv("PATH", root)
 	manifest := installTestManifest(t, root, "reader", "feed", 1, true)
 	installTestManifest(t, root, "second", "other", 1, true)
 	bad := installTestManifest(t, root, "forged", "craft", 1, false)
@@ -274,8 +276,8 @@ func TestDaemonEndToEnd(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if len(w.Assignments) != 1 || w.Assignments[0].State != engine.AssignmentPending {
-			t.Error("等待目标的派工应保持 pending")
+		if len(w.Assignments) != 1 || w.Assignments[0].State != engine.AssignmentPending || w.Execution == nil || w.Execution.Target == nil || w.Execution.Target.Kind != "scratch" {
+			t.Error("研判接单没有登记待执行的派工和 scratch 目标")
 		}
 		return nil
 	}))

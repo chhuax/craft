@@ -18,6 +18,7 @@ type Outcome struct {
 	Scope     string                     `json:"scope,omitempty"`
 	Rules     []string                   `json:"rules,omitempty"`
 	WorkID    string                     `json:"workId,omitempty"`
+	Target    *TargetSnapshot            `json:"target,omitempty"`
 }
 
 // AssessByRules 从引擎给出的候选快照生成 v1 回执；推断候选只记录建议，明确授权按当前策略处理。

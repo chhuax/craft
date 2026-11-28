@@ -3,12 +3,21 @@ package enginetest
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
 
 	"github.com/chhuax/craft/internal/engine"
 )
+
+func checkScratchTarget(t *testing.T, w engine.Work) {
+	t.Helper()
+	want := &engine.TargetSnapshot{ID: "scratch", Kind: "scratch", Title: w.Title, Evidence: []string{"v1 无选址，默认在临时目录执行"}, SelectedBy: "default"}
+	if w.Execution == nil || !reflect.DeepEqual(w.Execution.Target, want) {
+		t.Fatalf("Work %s 的默认目标错误：%+v", w.ID, w.Execution)
+	}
+}
 
 func decideAccept(t *testing.T, s engine.Store) {
 	p := evalPolicy(t, engine.Settings{})
@@ -79,6 +88,7 @@ func decideAccept(t *testing.T, s engine.Store) {
 	if state.disposition.DecisionID != d.ID {
 		t.Fatal("批内其他事件缺少决策")
 	}
+	checkScratchTarget(t, *w)
 	for _, eid := range []string{ev.ID, ""} {
 		out.EvalID = eid
 		replay, err := e.Decide(t.Context(), out)
@@ -86,6 +96,26 @@ func decideAccept(t *testing.T, s engine.Store) {
 		if replay.ID != d.ID || len(launches) != 2 {
 			t.Fatal("重复接单产生了新决策或派工")
 		}
+	}
+}
+
+func presetTarget(t *testing.T, s engine.Store) {
+	ctx := t.Context()
+	p := evalPolicy(t, engine.Settings{})
+	e := evalEngine(t, s, &p)
+	ref := item("selected")
+	receive(t, e, trigger("select", "assign", ref), engine.Stored)
+	checkDue(t, e, 1)
+	target := &engine.TargetSnapshot{ID: "chosen", Kind: "dir", Path: filepath.Join(t.TempDir(), "project"), Title: "已选目录", Evidence: []string{"研判已指定"}, SelectedBy: "assessor"}
+	out := engine.Outcome{Kind: engine.Accept, EvalID: held(t, s, ref).ID, TriggerID: "select", Target: target}
+	d, err := e.Decide(ctx, out)
+	must(t, err)
+	out.Target = nil
+	replay, err := e.Decide(ctx, out)
+	must(t, err)
+	w := readWork(t, s, d.WorkID)
+	if replay.ID != d.ID || len(w.Assignments) != 1 || w.Execution == nil || !reflect.DeepEqual(w.Execution.Target, target) {
+		t.Fatalf("预设目标未保留到重放后：%+v", w.Execution)
 	}
 }
 

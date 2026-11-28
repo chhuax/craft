@@ -171,11 +171,13 @@ func humanDecisions(t *testing.T, s engine.Store) {
 	must(t, err)
 	state := readIntake(t, s, w.Origin.TriggerID, []string{engine.ThreadKey(r)}, []string{w.ID})
 	tr := state.trigger
+	checkScratchTarget(t, *state.works[w.ID])
 	if tr == nil || tr.Source != "craft" || tr.Event != "person.request" || !tr.Human || tr.Text != "处理该对象" || w.Mandate.Strength != engine.Explicit || w.Mandate.Basis.Via != engine.ViaPersonRequest || len(w.Assignments) != 1 || !w.Follows[0].Own || state.disposition.DecisionID != w.DecisionID {
 		t.Fatalf("人的授权 %+v %+v", w, tr)
 	}
 	again, err := e.RequestItem(ctx, r, "重复")
 	must(t, err)
+	checkScratchTarget(t, again)
 	if again.ID != w.ID {
 		t.Fatal("为在办对象重复建单")
 	}
