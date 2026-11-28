@@ -167,6 +167,8 @@ daemon 启动、effect 开始前，按 `createdAt` 升序遍历 open Work：
 - `humanAction` 传字符串时创建问题（`ask` 缺省为 `owner`，可附 `actionId`）；传 `null` 清除当前问题；省略则保留。`ready` 的清理规则照旧。
 - `summary` 不设长度上限，面板按卡片展示限制截断。
 - **角色识别以宿主会话号为准**：取当前宿主会话号与某个 open Work 的 `execution.session` 比对；环境变量（`CRAFT_WATCH_ROLE`、`CRAFT_WORK_ID`）只在取不到会话号时作辅助。两者都没有 → 视为人。
+  - **Claude Code**：会话号取自会话 Bash 里的 `CLAUDE_CODE_SESSION_ID`，并**完全忽略** `CRAFT_*` 声明。原因（实测）：`--bg` 会话由常驻的后台服务托管，继承的是服务启动时的环境，其中的 Work、派工号是陈旧值，且没有 `CRAFT_SESSION_ID`。交互式的人用会话里也有该变量，所以必须再按会话号反查 open Work：查到 → 补全为 worker 绑定（取最新派工）；查不到或已结束 → 视为人；多个 open Work 同属一个会话 → 报错，不猜。没有该变量时不查库。
+  - **Claude Code 建会话直带首条**：不带正文的 `--bg` 只会建出没有对话记录的空会话，既不能 `--resume` 也没有别的投递入口，所以该宿主声明 `createSeparatesPrompt=false`。
 
 ## 12. 执行方的写入边界
 
