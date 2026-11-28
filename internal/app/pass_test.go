@@ -31,7 +31,7 @@ func TestDrainRollbackAndPoison(t *testing.T) {
 		name                 string
 		drain                func(*Runtime, context.Context) (bool, error)
 		remaining, committed int
-	}{{"逐行提交", (*Runtime).drain, 1, 1}, {"批事务", drainBatch, 4, 0}} {
+	}{{"逐行提交", drainRows, 1, 1}, {"批事务", (*Runtime).drain, 4, 0}} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := inboxDB(t, filepath.Join(t.TempDir(), "db"))
 			r := testRuntime(t, db)

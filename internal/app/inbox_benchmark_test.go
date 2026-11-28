@@ -65,8 +65,8 @@ func BenchmarkInboxDrain(b *testing.B) {
 					b.StartTimer()
 					for range benchInboxCount / batchLimit {
 						drain := (*Runtime).drain
-						if mode == "Batch" {
-							drain = drainBatch
+						if mode == "Row" {
+							drain = drainRows
 						}
 						_, err := drain(r, b.Context())
 						checkErr(b, err)
@@ -114,44 +114,46 @@ func seedDrain(b *testing.B, r *Runtime, threads, events int) {
 	}))
 }
 
-// 保留完整的保存点方案作同机对照，包含队尾检查、坏行隔离和提交回调。
-func drainBatch(r *Runtime, ctx context.Context) (bool, error) {
-	var pending bool
-	err := r.repo.db.View(ctx, func(read store.SQLiteReader) error {
-		var err error
-		pending, err = read.HasInbox()
-		return err
-	})
-	if err != nil || !pending {
-		return false, err
-	}
-	var more bool
-	err = r.repo.db.Write(ctx, func(tx *store.SQLiteTx) error {
-		rows, err := tx.InboxBatch(batchLimit)
-		if err != nil {
+// drainRows 是逐行提交的旧生产实现，仅留作同机对照与故障语义对比。
+func drainRows(r *Runtime, ctx context.Context) (bool, error) {
+	db := r.repo.db
+	var rows []store.InboxRow
+	err := db.View(ctx, func(read store.SQLiteReader) error {
+		pending, err := read.HasInbox()
+		if err != nil || !pending {
 			return err
 		}
-		for _, row := range rows {
-			err := tx.Savepoint(ctx, func(child *store.SQLiteTx) error { return r.consume(ctx, child, row) })
-			if err == nil {
-				continue
-			}
-			if !errors.Is(err, errPoison) {
-				return fmt.Errorf("消费 inbox[%q]: %w", row.ID, err)
-			}
-			// 保存点已撤销该行的全部引擎写入和广播。删除坏行以免每拍都阻塞后续事件。
-			if delErr := tx.DeleteInbox(row.ID); delErr != nil {
-				return errors.Join(err, delErr)
-			}
-			tx.AfterCommit(func() { slog.Error("已移除损坏的 inbox 行", "id", row.ID, "seq", row.Seq, "error", err) })
-		}
-		// 不足一批已读到队尾；后来入队的行有自己的提交唤醒或外部版本通知。
-		if len(rows) == batchLimit {
-			more, err = tx.HasInbox()
-		}
+		rows, err = read.InboxBatch(batchLimit)
 		return err
 	})
-	return err == nil && more, err
+	if err != nil {
+		return false, err
+	}
+	// 只有本 Pass 删除队列行，接收方按主键忽略重放，故这里取出的内容在消费前不会被替换。
+	for _, row := range rows {
+		err := db.Write(ctx, func(tx *store.SQLiteTx) error { return r.consume(ctx, tx, row) })
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, errPoison) {
+			return false, fmt.Errorf("消费 inbox[%q]: %w", row.ID, err)
+		}
+		// 此行的引擎修改已回滚。清除坏行若也失败，原行仍在，下轮会重试。
+		if delErr := db.Write(ctx, func(tx *store.SQLiteTx) error { return tx.DeleteInbox(row.ID) }); delErr != nil {
+			return false, errors.Join(err, delErr)
+		}
+		slog.Error("已移除损坏的 inbox 行", "id", row.ID, "seq", row.Seq, "error", err)
+	}
+	if len(rows) < batchLimit {
+		return false, nil
+	}
+	var more bool
+	err = db.View(ctx, func(read store.SQLiteReader) error {
+		var err error
+		more, err = read.HasInbox()
+		return err
+	})
+	return more, err
 }
 
 // BenchmarkIdlePass 包含定时拍的外部写入检查与完整空闲 Pass，不计等待时长。
