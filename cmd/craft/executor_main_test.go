@@ -50,7 +50,9 @@ func TestExecutorCLI(t *testing.T) {
 		{"first", "session-first", "", "worker", "first", 0}, {"second", "session-first", "", "worker", "first", 5}, {"first", "other", "", "worker", "first", 5}, {"first", "session-first", "", "person", "first", 4}, {"first", "", "", "worker", "first", 4}, {"first", "", "session-first", "worker", "first", 0}, {"first", "session-first", "session-second", "worker", "first", 4}, {"first", "session-first", "", "worker", "old", 5},
 	} {
 		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestExecutorCLI$")
-		env := map[string]string{"CRAFT_TEST_CLI": "1", "CRAFT_HOME": home, "GORACE": "atexit_sleep_ms=0", host.EnvWork: tc.work, host.EnvHost: "codex", host.EnvRole: tc.role, host.EnvAssignment: tc.assignment, host.EnvSessionID: tc.id, host.EnvCodexThreadID: tc.native}
+		env := map[string]string{"CRAFT_TEST_CLI": "1", "CRAFT_HOME": home, "GORACE": "atexit_sleep_ms=0",
+			host.EnvWork: tc.work, host.EnvHost: "codex", host.EnvRole: tc.role, host.EnvAssignment: tc.assignment,
+			host.EnvSessionID: tc.id, host.EnvCodexThreadID: tc.native, host.EnvClaudeSessionID: ""}
 		for _, entry := range os.Environ() {
 			k, _, _ := strings.Cut(entry, "=")
 			if _, ok := env[k]; !ok {

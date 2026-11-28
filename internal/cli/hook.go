@@ -24,9 +24,9 @@ type sessionStartOutput struct {
 
 func sessionStart(i *invocation) (result, error) {
 	switch i.flags["--host"] {
-	case "claude-code", "codex":
+	case host.ClaudeCode, "codex":
 	default:
-		return result{}, invalid("--host 需要 claude-code 或 codex")
+		return result{}, invalid("--host 需要 %s 或 codex", host.ClaudeCode)
 	}
 	ctx, cancel := context.WithTimeout(i.ctx, 1500*time.Millisecond)
 	defer cancel()

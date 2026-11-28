@@ -15,7 +15,7 @@ import (
 	"github.com/chhuax/craft/internal/store"
 )
 
-// SessionBinding 声明宿主与派工；执行命令前必须在同一事务核对本地登记。
+// SessionBinding 只有原生会话身份时须先查询归属。完整绑定仍须在命令事务内核对。
 type SessionBinding struct {
 	WorkID     string
 	Session    engine.Session
@@ -60,32 +60,31 @@ func (r CommandReader) lookup(name string, args ...any) ([]store.Doc, error) {
 	return r.read.Lookup(name, args...)
 }
 
+func (r CommandReader) sessionWork(s engine.Session) (*engine.Work, error) {
+	if r.read == nil || s.Host == "" || s.ID == "" {
+		return nil, nil
+	}
+	works, err := (engineReader{*r.read}).works("sessionWorks", s.Host, s.ID)
+	if err != nil || len(works) == 0 {
+		return nil, err
+	}
+	// 索引把 open Work 排在最前；若第二项也 open，就无法唯一认定归属。
+	if len(works) > 1 && works[1].Ended == nil {
+		return nil, &engine.UserError{Code: engine.CodeNoWorkForSession}
+	}
+	return &works[0], nil
+}
+
 func (r CommandReader) boundWork(b SessionBinding) (*engine.Work, error) {
-	rows, err := r.lookup("sessionWorks", b.Session.Host, b.Session.ID)
+	w, err := r.sessionWork(b.Session)
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 || b.Session.Host == "" || b.Session.ID == "" {
-		return nil, &engine.UserError{Code: engine.CodeNoWorkForSession}
-	}
-	var w engine.Work
-	if err := decodeDocs(rows[:1], func(int) any { return &w }); err != nil {
-		return nil, err
-	}
-	if b.WorkID != "" && w.ID != b.WorkID {
+	if w == nil || b.WorkID != "" && w.ID != b.WorkID {
 		return nil, &engine.UserError{Code: engine.CodeNoWorkForSession}
 	}
 	if w.Ended != nil {
 		return nil, &engine.UserError{Code: engine.CodeWorkEnded}
-	}
-	if len(rows) > 1 {
-		var other engine.Work
-		if err := decodeDocs(rows[1:], func(int) any { return &other }); err != nil {
-			return nil, err
-		}
-		if other.Ended == nil {
-			return nil, &engine.UserError{Code: engine.CodeNoWorkForSession}
-		}
 	}
 	if len(w.Assignments) == 0 || b.Assignment == "" {
 		return nil, &engine.UserError{Code: engine.CodeUnknownAssignment}
@@ -97,7 +96,7 @@ func (r CommandReader) boundWork(b SessionBinding) (*engine.Work, error) {
 	if w.Execution.Assignment != "" && w.Execution.Assignment != b.Assignment {
 		return nil, &engine.UserError{Code: engine.CodeNoWorkForSession}
 	}
-	return &w, nil
+	return w, nil
 }
 
 type lockedStore struct {

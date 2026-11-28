@@ -12,6 +12,9 @@ import (
 	"strings"
 )
 
+// ClaudeCode 是状态库和驱动共用的宿主标识。
+const ClaudeCode = "claude-code"
+
 // 会话号返回前可传宿主、角色、Work 与派工。EnvSessionID 只在宿主已确认 ID 后传给后续命令。
 // 环境来自调用方，不能充当人的授权；CLI 仍须核对本地派工与宿主会话。
 const (
@@ -22,6 +25,8 @@ const (
 	EnvRole       = "CRAFT_WATCH_ROLE"
 	// EnvCodexThreadID 由宿主在取得线程号后设置，绝不能从 daemon 继承。
 	EnvCodexThreadID = "CODEX_THREAD_ID"
+	// EnvClaudeSessionID 由 Claude Code 为当前会话设置，交互会话也有此变量。
+	EnvClaudeSessionID = "CLAUDE_CODE_SESSION_ID"
 )
 
 // BindingEnv 只接受派工方给出的归属，忽略输入中自报的宿主、角色和会话号。

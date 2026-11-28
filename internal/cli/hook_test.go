@@ -19,6 +19,7 @@ import (
 
 	"github.com/chhuax/craft/internal/app"
 	"github.com/chhuax/craft/internal/engine"
+	"github.com/chhuax/craft/internal/host"
 )
 
 const hookInput = `{"session_id":"host-session","cwd":"somewhere","source":"startup","hook_event_name":"SessionStart","future":"私有输入"}`
@@ -62,7 +63,7 @@ func hookEnv(t testing.TB, home string) {
 func TestSessionStartNoState(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "missing")
 	hookEnv(t, home)
-	for _, host := range []string{"claude-code", "codex"} {
+	for _, host := range []string{host.ClaudeCode, "codex"} {
 		for _, input := range []string{hookInput, "", "{", "null", hookInput + "!"} {
 			msg := startHook(t, host, strings.NewReader(input))
 			if !strings.Contains(msg, "人的会话") || !strings.Contains(msg, "状态") || !strings.Contains(msg, "daemon") || !strings.Contains(msg, "待人处理") {
@@ -86,7 +87,7 @@ func TestSessionStartUnreadableState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "daemon.json"), []byte("invalid"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	msg := startHook(t, "claude-code", strings.NewReader(hookInput))
+	msg := startHook(t, host.ClaudeCode, strings.NewReader(hookInput))
 	if !strings.Contains(msg, "不可用") || strings.Contains(msg, "待人处理 0") || strings.Contains(msg, "daemon 运行中") {
 		t.Fatal(msg)
 	}
@@ -132,7 +133,7 @@ func TestSessionStartUnresponsiveDaemon(t *testing.T) {
 	if err := s.publish(home); err != nil {
 		t.Fatal(err)
 	}
-	msg := startHook(t, "claude-code", strings.NewReader(hookInput))
+	msg := startHook(t, host.ClaudeCode, strings.NewReader(hookInput))
 	if !strings.Contains(msg, "daemon 无法核实") || !strings.Contains(msg, "待人处理 0") {
 		t.Fatal(msg)
 	}
@@ -176,7 +177,7 @@ func TestSessionStartWorkerAndDaemon(t *testing.T) {
 	t.Setenv("CRAFT_WORK_ID", "work-A")
 	t.Setenv("CRAFT_ASSIGNMENT_ID", "assignment-B")
 	serveActions(t, home, &actionClock{})
-	msg := startHook(t, "claude-code", strings.NewReader(hookInput))
+	msg := startHook(t, host.ClaudeCode, strings.NewReader(hookInput))
 	for _, want := range []string{"worker", "work-A", "assignment-B", "daemon 运行中", "待人处理 0", "craft watch read"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("缺少 %q: %s", want, msg)
