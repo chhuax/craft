@@ -15,6 +15,15 @@ import (
 	"testing"
 )
 
+// 契约套件供适配器复用，只有导入 engine 才能取得端口类型。
+var standardImportExceptions = map[[2]string]bool{
+	{"internal/engine/repotest", "github.com/chhuax/craft/internal/engine"}: true,
+}
+
+func allowedImport(dir, pkg string) bool {
+	return standardImportExceptions[[2]string{dir, pkg}]
+}
+
 func TestStandardLibraryOnly(t *testing.T) {
 	root := os.DirFS(filepath.Join("..", ".."))
 	imports := make(map[string][]string)
@@ -28,7 +37,9 @@ func TestStandardLibraryOnly(t *testing.T) {
 				return nil
 			}
 			return visitImports(root, name, func(pkg string) {
-				imports[pkg] = append(imports[pkg], name)
+				if !allowedImport(path.Dir(name), pkg) {
+					imports[pkg] = append(imports[pkg], name)
+				}
 			})
 		})
 		if err != nil {
@@ -176,4 +187,22 @@ func isCode(name string, data []byte) bool {
 		return true
 	}
 	return false
+}
+
+func TestStandardImportException(t *testing.T) {
+	for _, tc := range []struct {
+		dir, pkg string
+		want     bool
+	}{
+		{"internal/engine/repotest", "github.com/chhuax/craft/internal/engine", true},
+		{"internal/engine/repotest", "github.com/chhuax/craft/internal/store", false},
+		{"internal/engine/repotest", "example.org/helper", false},
+		{"internal/engine/repotest/extra", "github.com/chhuax/craft/internal/engine", false},
+		{"internal/method", "github.com/chhuax/craft/internal/engine", false},
+		{"internal/alarm", "github.com/chhuax/craft/internal/engine", false},
+	} {
+		if got := allowedImport(tc.dir, tc.pkg); got != tc.want {
+			t.Errorf("%s 导入 %q 放行 = %t", tc.dir, tc.pkg, got)
+		}
+	}
 }
