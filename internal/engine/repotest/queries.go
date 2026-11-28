@@ -323,3 +323,77 @@ func assessmentIndexes(t *testing.T, s engine.Store) {
 		return nil
 	}))
 }
+
+func lifecycleIndexes(t *testing.T, s engine.Store) {
+	ctx := t.Context()
+	th := engine.Thread{Key: "one", Subscriptions: []string{"w", "wx"}, Context: []string{"w"}, Evaluating: &engine.Evaluation{ID: "eval"}}
+	check := func(r engine.Reader, want []string) {
+		t.Helper()
+		keys, err := r.SubscribedThreadKeys("w")
+		must(t, err)
+		rows, err := r.EvaluatingThreads()
+		must(t, err)
+		var evaluating []string
+		for _, th := range rows {
+			evaluating = append(evaluating, th.Key)
+		}
+		if !slices.Equal(keys, want) || !slices.Equal(evaluating, want) {
+			t.Fatalf("订阅 %v、活跃研判 %v", keys, rows)
+		}
+	}
+	must(t, s.Atomic(ctx, func(u engine.Unit) error {
+		must(t, u.PutThread(th))
+		check(u, []string{"one"})
+		err := u.Atomic(ctx, func(c engine.Unit) error {
+			th.Subscriptions = []string{"wx"}
+			th.Context = nil
+			th.Evaluating = nil
+			must(t, c.PutThread(th))
+			check(c, nil)
+			return errRollback
+		})
+		if !errors.Is(err, errRollback) {
+			return err
+		}
+		check(u, []string{"one"})
+		return nil
+	}))
+}
+
+func openOrigins(t *testing.T, s engine.Store) {
+	ctx := t.Context()
+	ref := engine.NewThreadRef("feed", "item", "same")
+	side := engine.NewThreadRef("feed", "item", "other")
+	key := engine.ThreadKey(ref)
+	check := func(r engine.Reader, key, want string) {
+		t.Helper()
+		id, err := r.OpenOriginWorkID(key)
+		must(t, err)
+		if id != want {
+			t.Fatalf("对象 %q 的在办起源工作 %q，期望 %q", key, id, want)
+		}
+	}
+	must(t, s.Atomic(ctx, func(u engine.Unit) error {
+		w := engine.Work{ID: "one", Origin: engine.Origin{TriggerID: "start"}}
+		must(t, u.PutWork(w))
+		w.ID = "two"
+		must(t, u.PutWork(w))
+		check(u, key, "")
+		must(t, u.PutTrigger(engine.Trigger{ID: "start", Threads: []engine.ThreadRef{ref, side}}))
+		check(u, key, "two")
+		check(u, engine.ThreadKey(side), "")
+		err := u.Atomic(ctx, func(c engine.Unit) error {
+			w.Ended = &engine.WorkEnd{}
+			must(t, c.PutWork(w))
+			check(c, key, "one")
+			return errRollback
+		})
+		if !errors.Is(err, errRollback) {
+			return err
+		}
+		check(u, key, "two")
+		must(t, u.PutWork(w))
+		check(u, key, "one")
+		return nil
+	}))
+}

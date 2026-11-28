@@ -22,7 +22,7 @@ func Run(t *testing.T, factory func(t *testing.T) engine.Store) {
 	}{
 		{"aggregates", aggregates}, {"ownership", ownership}, {"links", links},
 		{"savepoints", savepoints}, {"callbacks", callbacks}, {"snapshot", snapshot},
-		{"研判索引", assessmentIndexes}, {"active", active}, {"events", events}, {"concurrent", concurrent},
+		{"退订后的在办起源", openOrigins}, {"生命周期索引", lifecycleIndexes}, {"研判索引", assessmentIndexes}, {"active", active}, {"events", events}, {"concurrent", concurrent},
 	} {
 		t.Run(tc.name, func(t *testing.T) { tc.check(t, factory(t)) })
 	}

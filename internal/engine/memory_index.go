@@ -20,9 +20,11 @@ type indexNode struct {
 type writeMark byte
 
 type memoryRow struct {
-	data   []byte
-	lookup string // 辅助索引的关联键；更新聚合时用它移除旧项
-	order  string // 首次插入的位置，仅活跃集需要
+	origin      string   // 在办工作的不可变起源事件，用于刷新按起源对象的反查
+	subscribers []string // Thread 的反查索引键，避免更新索引时再次解码聚合
+	data        []byte
+	lookup      string // 辅助索引的关联键；更新聚合时用它移除旧项
+	order       string // 首次插入的位置，仅活跃集需要
 }
 
 func (n *indexNode) edge(b byte) (int, bool) {

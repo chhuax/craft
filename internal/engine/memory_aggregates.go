@@ -45,7 +45,24 @@ func (u *memoryUnit) PutTrigger(v Trigger) error {
 	if u.triggers.get(v.ID) != nil {
 		return nil
 	}
-	return u.put(&u.triggers, v.ID, &v)
+	if err := u.put(&u.triggers, v.ID, &v); err != nil {
+		return err
+	}
+	if len(v.Threads) > 0 {
+		key := ThreadKey(v.Threads[0])
+		u.triggers.get(v.ID).lookup = key
+		// 导入时允许先写工作后写起源事件，此时才知道反查所需的主对象键。
+		pending := "pending" + linkPrefix(v.ID)
+		var waiting []*memoryRow
+		for row := range u.openOrigins.prefixTree(pending).reverseRows() {
+			waiting = append(waiting, row)
+		}
+		for _, row := range waiting {
+			u.openOrigins = u.openOrigins.set(u.mark, pending+row.order, nil)
+			u.openOrigins = u.openOrigins.set(u.mark, "thread"+linkPrefix(key)+row.order, row)
+		}
+	}
+	return nil
 }
 
 func (u *memoryUnit) PutDisposition(id string, v TriggerDisposition) error {
@@ -61,13 +78,40 @@ func (u *memoryUnit) PutThread(v Thread) error {
 	if err := u.putIndexed(&u.threads, &u.active, v.Key, &v, v.Closed == nil && v.Evaluating == nil && len(v.Pending) > 0, eval); err != nil {
 		return err
 	}
+	row := u.threads.get(v.Key)
+	u.indexSubscriptions(v, old, row)
 	if old != nil && old.lookup != "" && old.lookup != eval {
 		u.byEval = u.byEval.set(u.mark, old.lookup, nil)
 	}
 	if eval != "" {
-		u.byEval = u.byEval.set(u.mark, eval, u.threads.get(v.Key))
+		u.byEval = u.byEval.set(u.mark, eval, row)
 	}
 	return nil
+}
+
+func (u *memoryUnit) indexSubscriptions(th Thread, old, row *memoryRow) {
+	// 某些旧数据退订时只清了 subscriptions，结束 Work 仍须清除孤立的 context。
+	ids := append(slices.Clone(th.Subscriptions), th.Context...)
+	slices.Sort(ids)
+	row.subscribers = slices.Compact(ids)
+	var previous []string
+	if old != nil {
+		previous = old.subscribers
+	}
+	for _, id := range previous {
+		if _, keep := slices.BinarySearch(row.subscribers, id); !keep {
+			u.subscribedThreads = u.subscribedThreads.set(u.mark, linkPrefix(id)+th.Key, nil)
+		}
+	}
+	for _, id := range row.subscribers {
+		if _, exists := slices.BinarySearch(previous, id); !exists {
+			u.subscribedThreads = u.subscribedThreads.set(u.mark, linkPrefix(id)+th.Key, &memoryRow{data: []byte(th.Key)})
+		}
+	}
+}
+
+func (r *memoryView) SubscribedThreadKeys(workID string) ([]string, error) {
+	return linkedKeys(r.subscribedThreads, workID)
 }
 
 func (u *memoryUnit) PutWork(v Work) error {
@@ -85,7 +129,32 @@ func (u *memoryUnit) PutWork(v Work) error {
 	if key != "" && (old == nil || old.lookup != key) {
 		u.recentOpen = u.recentOpen.set(u.mark, key+u.works.get(v.ID).order, &memoryRow{data: []byte(v.ID)})
 	}
+	row := u.works.get(v.ID)
+	if v.Ended == nil {
+		row.origin = v.Origin.TriggerID
+	}
+	if old != nil && old.origin != row.origin && old.origin != "" {
+		u.openOrigins = u.openOrigins.set(u.mark, u.originPrefix(old.origin)+row.order, nil)
+	}
+	if row.origin != "" && (old == nil || old.origin != row.origin) {
+		u.openOrigins = u.openOrigins.set(u.mark, u.originPrefix(row.origin)+row.order, &memoryRow{data: []byte(v.ID), order: row.order})
+	}
 	return nil
+}
+
+func (r *memoryView) originPrefix(triggerID string) string {
+	if tr := r.triggers.get(triggerID); tr != nil && tr.lookup != "" {
+		return "thread" + linkPrefix(tr.lookup)
+	}
+	return "pending" + linkPrefix(triggerID)
+}
+
+func (r *memoryView) OpenOriginWorkID(key string) (string, error) {
+	// 倒序取最近插入的一件。在合法的单自有对象上通常只有一项。
+	for row := range r.openOrigins.prefixTree("thread" + linkPrefix(key)).reverseRows() {
+		return string(row.data), nil
+	}
+	return "", nil
 }
 
 func (u *memoryUnit) PutDecision(v Decision) error {
@@ -135,8 +204,14 @@ func (n *indexNode) readMany(keys []string, dest func(string) any) error {
 }
 
 func (r *memoryView) ActiveThreadsWithPending() ([]Thread, error) {
+	return indexedThreads(r.active)
+}
+
+func (r *memoryView) EvaluatingThreads() ([]Thread, error) { return indexedThreads(r.byEval) }
+
+func indexedThreads(index *indexNode) ([]Thread, error) {
 	var result []Thread
-	err := r.active.walk(func(row *memoryRow) error {
+	err := index.walk(func(row *memoryRow) error {
 		var th Thread
 		if err := row.decode(&th); err != nil {
 			return err

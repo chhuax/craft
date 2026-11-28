@@ -66,6 +66,12 @@ type Reader interface {
 	OpenWorks() ([]Work, error)
 	// RecentOpenWorks 按 createdAt 倒序（同毫秒按首次插入倒序）返回至多 limit 个未排除的在办 Work，非正上限返回空。
 	RecentOpenWorks(limit int, exclude ...string) ([]Work, error)
+	// OpenOriginWorkID 返回以该对象为主起源的最近插入的在办工作，退订不改变起源。缺失时返回空串。
+	OpenOriginWorkID(threadKey string) (string, error)
+	// SubscribedThreadKeys 从 Work 反查全部普通和只读订阅，包含未登记为 Follow 的对象。
+	SubscribedThreadKeys(workID string) ([]string, error)
+	// EvaluatingThreads 用于改版时取得所有仍持有研判批次的对象。
+	EvaluatingThreads() ([]Thread, error)
 	// ThreadByEval 仅命中当前仍在进行的研判，结束或被替换后立即失效。
 	ThreadByEval(evalID string) (*Thread, error)
 	// AcceptedByTrigger 按批内事件键查曾经建单的决策，后续 ignore 不抹去授权历史。
