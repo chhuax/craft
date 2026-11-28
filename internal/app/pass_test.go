@@ -27,67 +27,89 @@ func testRuntime(t testing.TB, db *store.SQLite) *Runtime {
 }
 
 func TestDrainRollbackAndPoison(t *testing.T) {
-	db := inboxDB(t, filepath.Join(t.TempDir(), "db"))
-	r := testRuntime(t, db)
-	src := testSource(t, db, r.Request)
-	for _, id := range []string{"first", "bad", "last"} {
-		_, err := src.Receive(t.Context(), inboxTrigger(id))
-		checkErr(t, err)
-	}
-	// 第三行发事件时耗尽序号，前两行的写入、删除与广播也须撤销。
-	checkErr(t, db.Write(t.Context(), func(tx *store.SQLiteTx) error { return tx.Put("watch_kv", "event.rev", []byte("9223372036854775805")) }))
-	var events []string
-	r.repo.Subscribe(func(ev engine.Event) { events = append(events, ev.Ref["trigger"]) })
-	if _, err := r.drain(t.Context()); err == nil {
-		t.Fatal("未报告计数器耗尽")
-	}
-	checkErr(t, db.View(t.Context(), func(tx store.SQLiteReader) error {
-		rows, err := tx.InboxBatch(10)
-		if err != nil {
-			return err
-		}
-		triggers, err := tx.List("watch_trigger", store.All)
-		if err != nil {
-			return err
-		}
-		if len(rows) != 3 || len(events) != 0 || len(triggers) != 0 {
-			t.Fatalf("整批回滚后 %v, %v, %v", rows, events, triggers)
-		}
-		return nil
-	}))
-	checkErr(t, db.Write(t.Context(), func(tx *store.SQLiteTx) error {
-		if err := tx.Delete("watch_kv", "event.rev"); err != nil {
-			return err
-		}
-		// 损坏对象文档，使引擎写完 Trigger 后解码关联对象失败。
-		if err := tx.Put("watch_thread", "feed:item:bad", []byte(`{"pending":42}`)); err != nil {
-			return err
-		}
-		_, err := tx.InsertInbox("malformed", []byte(`{"threads":2}`), benchAt)
-		return err
-	}))
-	more, err := r.drain(t.Context())
-	checkErr(t, err)
-	if more || !slices.Equal(events, []string{"first", "last"}) {
-		t.Fatalf("出队后 %t, %v", more, events)
-	}
-	checkErr(t, db.View(t.Context(), func(tx store.SQLiteReader) error {
-		rows, err := tx.InboxBatch(10)
-		if len(rows) != 0 || err != nil {
-			t.Fatalf("遗留坏行 %v, %v", rows, err)
-		}
-		triggers, err := tx.List("watch_trigger", store.All)
-		if err != nil {
-			return err
-		}
-		if len(triggers) != 2 || triggers["bad"] != nil {
-			t.Fatalf("保存点未隔离坏行 %v", triggers)
-		}
-		return nil
-	}))
-	got, err := src.Receive(t.Context(), inboxTrigger("first"))
-	if err != nil || got != "duplicate" {
-		t.Fatalf("重放 %q, %v", got, err)
+	for _, tc := range []struct {
+		name                 string
+		drain                func(*Runtime, context.Context) (bool, error)
+		remaining, committed int
+	}{{"逐行提交", (*Runtime).drain, 1, 1}, {"批事务", drainBatch, 4, 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := inboxDB(t, filepath.Join(t.TempDir(), "db"))
+			r := testRuntime(t, db)
+			ctx := t.Context()
+			src := testSource(t, db, r.Request)
+			for _, id := range []string{"first", "bad"} {
+				_, err := src.Receive(ctx, inboxTrigger(id))
+				checkErr(t, err)
+			}
+			checkErr(t, db.Write(ctx, func(tx *store.SQLiteTx) error {
+				// 解码关联对象发生在写入 Trigger 之后，可检测坏行是否遗留局部写入。
+				if err := tx.Put("watch_thread", "feed:item:bad", []byte(`{"pending":42}`)); err != nil {
+					return err
+				}
+				if _, err := tx.InsertInbox("malformed", []byte(`{"threads":2}`), benchAt); err != nil {
+					return err
+				}
+				u := r.repo.in(ctx, tx)
+				ref := engine.NewThreadRef("feed", "item", "last")
+				if err := u.PutThread(engine.Thread{Key: engine.ThreadKey(ref), Ref: ref, Subscriptions: []string{"work"}}); err != nil {
+					return err
+				}
+				if err := u.PutWork(engine.Work{ID: "work"}); err != nil {
+					return err
+				}
+				// 最后一行才有订阅者；在保存 Work 后注入共享队列故障，不能按坏行删除。
+				return tx.Put("watch_kv", "effect.seq", []byte(`"broken"`))
+			}))
+			_, err := src.Receive(ctx, inboxTrigger("last"))
+			checkErr(t, err)
+			var events []string
+			r.repo.Subscribe(func(ev engine.Event) { events = append(events, ev.Ref["trigger"]) })
+			if _, err := tc.drain(r, ctx); err == nil {
+				t.Fatal("未报告队列故障")
+			}
+			checkErr(t, db.View(ctx, func(read store.SQLiteReader) error {
+				rows, err := read.InboxBatch(10)
+				if err != nil {
+					return err
+				}
+				triggers, err := read.List("watch_trigger", store.All)
+				if err != nil {
+					return err
+				}
+				w, err := (engineReader{read}).GetWork("work")
+				if err != nil {
+					return err
+				}
+				if len(rows) != tc.remaining || len(events) != tc.committed || len(triggers) != tc.committed || triggers["bad"] != nil || triggers["last"] != nil || len(w.Inputs) != 0 {
+					t.Fatalf("失败后 inbox=%v，Trigger=%v，广播=%v，输入=%v", rows, triggers, events, w.Inputs)
+				}
+				return nil
+			}))
+			checkErr(t, db.Write(ctx, func(tx *store.SQLiteTx) error { return tx.Delete("watch_kv", "effect.seq") }))
+			more, err := tc.drain(r, ctx)
+			checkErr(t, err)
+			if more || !slices.Equal(events, []string{"first", "last"}) {
+				t.Fatalf("重试后 %t, %v", more, events)
+			}
+			checkErr(t, db.View(ctx, func(read store.SQLiteReader) error {
+				pending, err := read.HasInbox()
+				if err != nil {
+					return err
+				}
+				w, err := (engineReader{read}).GetWork("work")
+				if err != nil {
+					return err
+				}
+				if pending || len(w.Inputs) != 1 || w.Inputs[0].TriggerID != "last" {
+					t.Fatalf("重试后 inbox=%t，输入=%v", pending, w.Inputs)
+				}
+				return nil
+			}))
+			got, err := src.Receive(ctx, inboxTrigger("first"))
+			if err != nil || got != "duplicate" {
+				t.Fatalf("重放 %q, %v", got, err)
+			}
+		})
 	}
 }
 

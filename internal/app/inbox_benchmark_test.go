@@ -1,8 +1,11 @@
 package app
 
 import (
+	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -61,12 +64,12 @@ func BenchmarkInboxDrain(b *testing.B) {
 					seedDrain(b, r, threads, benchInboxCount)
 					b.StartTimer()
 					for range benchInboxCount / batchLimit {
+						drain := (*Runtime).drain
 						if mode == "Batch" {
-							_, err := r.drain(b.Context())
-							checkErr(b, err)
-						} else {
-							drainIndividually(b, r)
+							drain = drainBatch
 						}
+						_, err := drain(r, b.Context())
+						checkErr(b, err)
 					}
 					b.StopTimer()
 					checkErr(b, r.repo.Read(b.Context(), func(read engine.Reader) error {
@@ -111,18 +114,44 @@ func seedDrain(b *testing.B, r *Runtime, threads, events int) {
 	}))
 }
 
-func drainIndividually(b *testing.B, r *Runtime) {
-	b.Helper()
-	ctx := b.Context()
-	var batch []store.InboxRow
-	checkErr(b, r.repo.db.View(ctx, func(read store.SQLiteReader) error {
+// 保留完整的保存点方案作同机对照，包含队尾检查、坏行隔离和提交回调。
+func drainBatch(r *Runtime, ctx context.Context) (bool, error) {
+	var pending bool
+	err := r.repo.db.View(ctx, func(read store.SQLiteReader) error {
 		var err error
-		batch, err = read.InboxBatch(batchLimit)
+		pending, err = read.HasInbox()
 		return err
-	}))
-	for _, row := range batch {
-		checkErr(b, r.repo.db.Write(ctx, func(tx *store.SQLiteTx) error { return r.consume(ctx, tx, row) }))
+	})
+	if err != nil || !pending {
+		return false, err
 	}
+	var more bool
+	err = r.repo.db.Write(ctx, func(tx *store.SQLiteTx) error {
+		rows, err := tx.InboxBatch(batchLimit)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			err := tx.Savepoint(ctx, func(child *store.SQLiteTx) error { return r.consume(ctx, child, row) })
+			if err == nil {
+				continue
+			}
+			if !errors.Is(err, errPoison) {
+				return fmt.Errorf("消费 inbox[%q]: %w", row.ID, err)
+			}
+			// 保存点已撤销该行的全部引擎写入和广播。删除坏行以免每拍都阻塞后续事件。
+			if delErr := tx.DeleteInbox(row.ID); delErr != nil {
+				return errors.Join(err, delErr)
+			}
+			tx.AfterCommit(func() { slog.Error("已移除损坏的 inbox 行", "id", row.ID, "seq", row.Seq, "error", err) })
+		}
+		// 不足一批已读到队尾；后来入队的行有自己的提交唤醒或外部版本通知。
+		if len(rows) == batchLimit {
+			more, err = tx.HasInbox()
+		}
+		return err
+	})
+	return err == nil && more, err
 }
 
 // BenchmarkIdlePass 包含定时拍的外部写入检查与完整空闲 Pass，不计等待时长。

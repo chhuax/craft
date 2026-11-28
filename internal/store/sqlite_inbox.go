@@ -54,7 +54,7 @@ func (r SQLiteReader) HasInbox() (bool, error) {
 	return true, nil
 }
 
-// InboxBatch 按序号返回至多 limit 条记录；消费方须在写事务内选取和删除。
+// InboxBatch 按序号返回至多 limit 条记录；只有单一消费方且队列行不可替换时，才可跨事务持有这批记录。
 func (r SQLiteReader) InboxBatch(limit int) (_ []InboxRow, err error) {
 	if limit <= 0 {
 		return nil, nil
