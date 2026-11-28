@@ -49,6 +49,7 @@
 - manifest 字段一律顶层、snake_case。
 - 事件目录项：`id`、`label`、`default`（`off|observe|auto`）、`strength`（`explicit|inferred`）、`followup_only`、`on_unmatched`（`filter|record`）、`feed_tier`（`notice|digest`）、`rule`、`verb`（≤6 字，仅展示）、`no_target`（`scratch`）、`collapse`（`{group, by?}`，投递时合并同类事件）。
 - 非法值在加载 manifest 时拒绝。事件类型按 `<source>:<event>` 全局唯一。
+- **标识里不许含冒号**：扩展 `id`、闹钟 `id`、`watch_sources[].id`、`thread_kinds[].id` 在加载时拒绝 `:`。内核用冒号拼接这些标识得到库键（`<source>:<kind>:<id>`、`<ext>:<alarm>`、`<source>:<event>`），标识里有冒号会让不同的引用拼出同一个键，权限检查就被绕过。对象自己的 `id`（`ThreadRef.id`）允许含冒号——前面的各段不含冒号时，拼出的键仍可唯一还原。
 - **每个 `watch_sources[].id` 只归一个扩展**：一个扩展可以声明多个 source，但两个扩展声明同一个 source 时，**争用的各方都被拒绝加载**（结果不依赖加载顺序，其他独立扩展照常启动）。这是权限边界：扩展只能写自己声明的 source 下的对象（`thread/describe`、`thread/closed`、`work/bindThread` 等），source 被两个扩展共用就等于它们能互相改对方的对象。`craft` 是内核内置人事件的保留 source，任何扩展都不能声明。
 - `rule`、`default`、`strength` 进策略版本；`verb`、`no_target`、`collapse`、`feed_tier` 不进。
 
@@ -72,6 +73,7 @@
 | `shutdown` | `{}` | — |
 
 取消：内核发 `$/cancel {id}` 通知，扩展应尽快返回；超时后内核仍标记失败，进程留着等其自行结束，期间不再调度该 alarm。
+实现上，内核对 `alarm/run` 的调用在超时/取消后**仍等待远端响应或连接断开**才算该次运行结束（超时当场记失败，名额保留到真正结束），所以一个一直不返回的扩展会让对应的闹钟不再被调度，表现为健康告警，而不是被悄悄重叠执行。
 
 ## 4. 扩展 → 内核
 
