@@ -357,3 +357,30 @@ func TestDiscoverActionOwners(t *testing.T) {
 		})
 	}
 }
+
+func TestChannelDeclarations(t *testing.T) {
+	const ports = `{"channels":["in",{"id":"out","replyAction":"write"}],"other":9007199254740993}`
+	p := putManifest(t, t.TempDir(), "demo", manifestText("demo", `,"ports":`+ports+`,"actions":[{"id":"write","level":"auto"}]`))
+	m, err := loadManifest(p)
+	if err != nil || string(m.Ports) != ports || !reflect.DeepEqual(m.Channels, map[string]string{"in": "", "out": "write"}) {
+		t.Fatal(m, err)
+	}
+	for _, channels := range []string{
+		`[{"id":"","replyAction":"write"}]`, `["feed",{"id":"feed","replyAction":"write"}]`,
+		`[{"id":"feed","replyAction":"foreign"}]`, `[{"id":"feed"}]`,
+		`[{"id":"feed","replyAction":"read"}]`, `[false]`,
+	} {
+		p := putManifest(t, t.TempDir(), "demo", manifestText("demo", `,"ports":{"channels":`+channels+`},"actions":[{"id":"write","level":"auto"},{"id":"read","level":"auto","read_only":true}]`))
+		if _, err := loadManifest(p); err == nil || !strings.Contains(err.Error(), "channels") {
+			t.Errorf("无效的渠道被接受或错误缺少字段位置 %s: %v", channels, err)
+		}
+	}
+	root := t.TempDir()
+	first := putManifest(t, root, "one", manifestText("one", `,"ports":{"channels":["shared"]}`))
+	second := putManifest(t, root, "two", manifestText("two", `,"ports":{"channels":[{"id":"shared","replyAction":"write"}]},"actions":[{"id":"write","level":"auto"}]`))
+	putManifest(t, root, "free", manifestText("free", ""))
+	r := Discover(root)
+	if len(r.Extensions) != 1 || r.Extensions[0].Manifest.ID != "free" || r.Rejected[first] == nil || r.Rejected[second] == nil {
+		t.Errorf("渠道归属争用未隔离: %+v", r)
+	}
+}
