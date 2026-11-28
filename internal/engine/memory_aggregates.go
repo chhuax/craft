@@ -119,6 +119,12 @@ func (u *memoryUnit) PutWork(v Work) error {
 	if v.Ended == nil {
 		key = v.CreatedAt + "\x00"
 	}
+	inputs, err := indexInputs(v.Inputs, v.Undelivered)
+	if err != nil {
+		return err
+	}
+	v.Inputs = nil
+	v.Undelivered = nil
 	old := u.works.get(v.ID)
 	if err := u.putIndexed(&u.works, &u.open, v.ID, &v, v.Ended == nil, key); err != nil {
 		return err
@@ -130,6 +136,7 @@ func (u *memoryUnit) PutWork(v Work) error {
 		u.recentOpen = u.recentOpen.set(u.mark, key+u.works.get(v.ID).order, &memoryRow{data: []byte(v.ID)})
 	}
 	row := u.works.get(v.ID)
+	row.inputs = inputs
 	if v.Ended == nil {
 		row.origin = v.Origin.TriggerID
 	}
@@ -188,6 +195,9 @@ func (u *memoryUnit) indexDecision(d *Decision, row *memoryRow) {
 func (row *memoryRow) decode(dst any) error {
 	if err := jsonv2.Unmarshal(row.data, dst); err != nil {
 		return fmt.Errorf("解码 %T: %w", dst, err)
+	}
+	if w, ok := dst.(*Work); ok && row.inputs != nil {
+		return row.inputs.load(w)
 	}
 	return nil
 }

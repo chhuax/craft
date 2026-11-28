@@ -20,7 +20,7 @@ func Run(t *testing.T, factory func(t *testing.T) engine.Store) {
 		name  string
 		check func(*testing.T, engine.Store)
 	}{
-		{"aggregates", aggregates}, {"ownership", ownership}, {"links", links},
+		{"回复回执", replyReceipts}, {"队列单键查询", queuedEffect}, {"投递批次与完整聚合", deliveryWindow}, {"aggregates", aggregates}, {"ownership", ownership}, {"links", links},
 		{"savepoints", savepoints}, {"callbacks", callbacks}, {"snapshot", snapshot},
 		{"退订后的在办起源", openOrigins}, {"生命周期索引", lifecycleIndexes}, {"研判索引", assessmentIndexes}, {"active", active}, {"events", events}, {"concurrent", concurrent},
 	} {

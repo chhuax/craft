@@ -30,8 +30,9 @@ type memoryView struct {
 	insertions                                        uint64
 	rev                                               int64
 	// 只向已提交前缀之后追加。每个快照保留自己的长度，旧读者不会访问新槽位。
-	events  [][]byte
-	effects []Effect
+	events                  [][]byte
+	effects                 []Effect
+	effectKeys, replyStates *indexNode
 }
 
 type memoryUnit struct {

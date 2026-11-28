@@ -20,6 +20,7 @@ type indexNode struct {
 type writeMark byte
 
 type memoryRow struct {
+	inputs      *memoryInputs
 	origin      string   // 在办工作的不可变起源事件，用于刷新按起源对象的反查
 	subscribers []string // Thread 的反查索引键，避免更新索引时再次解码聚合
 	data        []byte

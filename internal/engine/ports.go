@@ -44,15 +44,32 @@ type Acceptance struct {
 	WorkID     string
 }
 
+// DeliveryWindow 是同一 Work 的投递视图。Head 为队首，Inputs 只含按键命中的输入。
+// 整个视图在写事务内读取和回写，后来到达的队尾与其他历史字段由仓储保留。
+type DeliveryWindow struct {
+	Ended       bool
+	Assignment  *Assignment
+	Failure     *DeliveryFailure
+	Batch, Head []string
+	Inputs      map[string]WorkInput
+	UpdatedAt   string
+}
+
 // Reader 仅供当前事务回调使用。所有查询结果（包括嵌套字段）均由调用方独占。
 // 单键缺失返回 nil, nil；批量按键取，省略缺失项，重复键只返回一份。
 type Reader interface {
+	// GetReplyStatus 返回跨队列消费保留的消息状态，空串表示从未入队。
+	GetReplyStatus(messageID string) (ReplyStatus, error)
+	// HasEffect 按队列主键检查尚未完成的请求，供中断恢复判定。
+	HasEffect(kind, key string) (bool, error)
 	GetTrigger(id string) (*Trigger, error)
 	GetTriggers(ids ...string) (map[string]*Trigger, error)
 	GetDisposition(triggerID string) (*TriggerDisposition, error)
 	GetDispositions(triggerIDs ...string) (map[string]*TriggerDisposition, error)
 	GetThread(key string) (*Thread, error)
 	GetThreads(keys ...string) (map[string]*Thread, error)
+	// GetDeliveryWindow 仅加载队首至多 len(ids) 项及按 ID 命中的 inputs。
+	GetDeliveryWindow(workID string, ids []string) (*DeliveryWindow, error)
 	GetWork(id string) (*Work, error)
 	GetWorks(ids ...string) (map[string]*Work, error)
 	GetDecision(id string) (*Decision, error)
@@ -100,7 +117,11 @@ type Unit interface {
 	PutDisposition(triggerID string, value TriggerDisposition) error
 	PutThread(Thread) error
 	PutWork(Work) error
+	// PutDeliveryWindow 仅回写该事务所读批次的投递字段，并从已核对的队首移除 consumed 项。
+	PutDeliveryWindow(workID string, window DeliveryWindow, consumed int) error
 	PutDecision(Decision) error
+	// PutReplyStatus 与回复入队或外发回执同事务写入。
+	PutReplyStatus(messageID string, status ReplyStatus) error
 	// LinkTrigger 重复登记同一对键不增加关联。
 	LinkTrigger(triggerID, threadKey string) error
 	Effects() Effects

@@ -15,6 +15,7 @@ func (u *memoryUnit) Enqueue(kind, key string, value json.RawMessage) error {
 	if !jsontext.Value(value).IsValid() {
 		return fmt.Errorf("effect %s[%q] 的值不是有效 JSON", kind, key)
 	}
+	u.effectKeys = u.effectKeys.set(u.mark, linkPrefix(kind)+key, &memoryRow{})
 	u.effects = append(u.effects, Effect{Kind: kind, Key: key, Value: bytes.Clone(value)})
 	return nil
 }
@@ -63,4 +64,24 @@ func (r *memoryView) EventsSince(rev int64, limit int) ([]Event, error) {
 		}
 	}
 	return out, nil
+}
+
+func (r *memoryView) HasEffect(kind, key string) (bool, error) {
+	return r.effectKeys.get(linkPrefix(kind)+key) != nil, nil
+}
+
+func (r *memoryView) GetReplyStatus(id string) (ReplyStatus, error) {
+	if row := r.replyStates.get(id); row != nil {
+		return ReplyStatus(row.lookup), nil
+	}
+	return "", nil
+}
+func (u *memoryUnit) PutReplyStatus(id string, status ReplyStatus) error {
+	switch status {
+	case ReplyPending, ReplySent, ReplyDropped, ReplyConfirm:
+		u.replyStates = u.replyStates.set(u.mark, id, &memoryRow{lookup: string(status)})
+		return nil
+	default:
+		return fmt.Errorf("回复 %q 的状态无效 %q", id, status)
+	}
 }

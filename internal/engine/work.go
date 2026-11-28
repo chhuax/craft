@@ -2,22 +2,24 @@ package engine
 
 // Work 聚合授权、派工和输入，只持久化事实。
 type Work struct {
-	ID          string           `json:"id"`
-	Title       string           `json:"title"`
-	DecisionID  string           `json:"decisionId"`
-	Mandate     Mandate          `json:"mandate"`
-	Channels    []ChannelRef     `json:"channels"`
-	Ended       *WorkEnd         `json:"ended,omitempty"`
-	Attention   *Question        `json:"attention,omitempty"`
-	Assignments []Assignment     `json:"assignments"`
-	Inputs      []WorkInput      `json:"inputs"`
-	Undelivered []string         `json:"undelivered"`
-	Follows     []Follow         `json:"follows,omitempty"`
-	Origin      Origin           `json:"origin"`
-	Execution   *Execution       `json:"execution,omitempty"`
-	Delivery    *DeliveryFailure `json:"delivery,omitempty"`
-	CreatedAt   string           `json:"createdAt"`
-	UpdatedAt   string           `json:"updatedAt"`
+	ID            string           `json:"id"`
+	Title         string           `json:"title"`
+	DecisionID    string           `json:"decisionId"`
+	Mandate       Mandate          `json:"mandate"`
+	Channels      []ChannelRef     `json:"channels"`
+	Ended         *WorkEnd         `json:"ended,omitempty"`
+	Attention     *Question        `json:"attention,omitempty"`
+	Assignments   []Assignment     `json:"assignments"`
+	Inputs        []WorkInput      `json:"inputs"`
+	Answers       []string         `json:"answers,omitempty"`
+	DeliveryBatch []string         `json:"deliveryBatch,omitempty"`
+	Undelivered   []string         `json:"undelivered"`
+	Follows       []Follow         `json:"follows,omitempty"`
+	Origin        Origin           `json:"origin"`
+	Execution     *Execution       `json:"execution,omitempty"`
+	Delivery      *DeliveryFailure `json:"delivery,omitempty"`
+	CreatedAt     string           `json:"createdAt"`
+	UpdatedAt     string           `json:"updatedAt"`
 }
 
 // WorkEnd 标记工作结束，保留结束方以区分人的停止决定。
@@ -30,6 +32,8 @@ type WorkEnd struct {
 
 // Question 保留问题身份和答复时刻，使同文的新问题仍可区分。
 type Question struct {
+	Ask        string `json:"ask,omitempty"`
+	ActionID   string `json:"actionId,omitempty"`
 	ID         string `json:"id"`
 	Question   string `json:"question"`
 	TriggerID  string `json:"triggerId,omitempty"`
@@ -89,6 +93,7 @@ type Assignment struct {
 
 // Report 保留执行方在本次派工中报告的状态与摘要。
 type Report struct {
+	ID      string      `json:"reportId,omitempty"`
 	State   ReportState `json:"state"`
 	Summary string      `json:"summary"`
 	At      string      `json:"at"`
