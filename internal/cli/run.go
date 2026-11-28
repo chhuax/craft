@@ -65,6 +65,7 @@ func commands() []commandSpec {
 		{"version", "", "", local, versionResult},
 		{"doctor", "", "", local, doctorResult},
 		{"hook session-start", "", "--host HOST", local, sessionStart},
+		{"hook stop", "", "--host HOST", local, hookStop},
 		{"daemon run", "", "", person, daemonRun},
 		{"daemon start", "", "", person, daemonStart},
 		{"daemon stop", "", "[--force]", person, daemonStop},
@@ -296,6 +297,10 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 	res, err := spec.handle(&i)
 	if err != nil {
 		return failure(stderr, asJSON, err)
+	}
+	if spec.path == "hook stop" {
+		// Stop 直接交还宿主，包括请求 --json 的调用也无需输出信封。
+		return 0
 	}
 	switch checks := res.payload.(type) {
 	case sessionStartOutput:

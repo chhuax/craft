@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chhuax/craft/internal/app"
 	"github.com/chhuax/craft/internal/exthost"
 	"github.com/chhuax/craft/pkg/protocol"
 )
@@ -25,8 +26,11 @@ import (
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "daemon", "hook":
+		case "daemon":
 			os.Exit(Run(os.Args[1:], "dev", os.Stdout, os.Stderr))
+		case "hook":
+			os.Exit(runBound(os.Args[1:], "dev", os.Stdout, os.Stderr, os.Getenv, os.UserHomeDir,
+				CommandContext{Session: app.SessionFromEnv(os.Getenv)}, func() string { return testNow }))
 		case "--action-fixture":
 			runActionFixture()
 			os.Exit(0)

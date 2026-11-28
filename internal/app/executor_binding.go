@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/chhuax/craft/internal/engine"
 	"github.com/chhuax/craft/internal/host"
@@ -41,8 +43,14 @@ func (b *SessionBinding) NeedsResolution() bool {
 
 // BindingForSession 根据只读快照识别角色，执行命令时仍须在事务内核对派工代次。
 func BindingForSession(ctx context.Context, home string, s engine.Session) (*SessionBinding, error) {
+	return bindingForSession(ctx, home, s, false)
+}
+
+func bindingForSession(ctx context.Context, home string, s engine.Session, ignoreUnavailable bool) (*SessionBinding, error) {
 	var b *SessionBinding
+	var opened bool
 	err := ViewCommands(ctx, home, func(r CommandReader) error {
+		opened = true
 		w, err := r.sessionWork(s)
 		if err != nil || w == nil || w.Ended != nil {
 			return err
@@ -55,9 +63,28 @@ func BindingForSession(ctx context.Context, home string, s engine.Session) (*Ses
 		return nil
 	})
 	if err != nil {
+		if !opened && ignoreUnavailable {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("解析宿主会话 %q 的派工: %w", s.ID, err)
 	}
 	return b, nil
+}
+
+// OpenStopCommands 先只读确认会话归属。无绑定或库打不开时返回空值，通知不能创建状态。
+func OpenStopCommands(ctx context.Context, home string, claim SessionBinding, clock engine.Clock) (*Commands, *SessionBinding, error) {
+	b, err := bindingForSession(ctx, home, claim.Session, true)
+	if e, ok := errors.AsType[*engine.UserError](err); ok && e.Code == engine.CodeUnknownAssignment {
+		return nil, nil, nil
+	}
+	if err != nil || b == nil || !claim.NeedsResolution() && claim != *b {
+		return nil, nil, err
+	}
+	db, err := store.OpenExistingSQLite(ctx, filepath.Join(home, "craft.db"))
+	if err != nil {
+		return nil, nil, nil
+	}
+	return &Commands{db: db, clock: clock}, b, nil
 }
 
 // WorkerTurnEnded 处理宿主 Stop 通知，已登记但投递尚未确认时，保留信号等送达事务消费。
