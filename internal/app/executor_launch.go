@@ -161,7 +161,8 @@ func (x *executor) register(ctx context.Context, p assignmentRef, dir string, s 
 
 func workerPermissions(target *engine.TargetSnapshot) host.Permissions {
 	if target != nil && target.Kind == "scratch" {
-		return host.Permissions{WriteScope: host.Workspace}
+		// worker 只能写自己的 scratch 目录，并且只能运行 craft 命令（用来读 Work 与回报）。
+		return host.Permissions{WriteScope: host.Workspace, Commands: []string{"craft"}}
 	}
 	return host.Permissions{}
 }

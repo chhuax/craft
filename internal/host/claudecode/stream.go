@@ -119,7 +119,7 @@ func (d *Driver) resume(ctx, life context.Context, s host.Session, cancel contex
 			return nil, host.Result{Outcome: host.Unsupported, Err: fmt.Errorf("%w: 缺少当前派工的权限与目录", host.Unsupported)}
 		}
 	}
-	args, err := permissionArgs(spec.Permissions)
+	args, err := permissionArgs(spec.Permissions, spec.Directory)
 	if err != nil {
 		return nil, host.Result{Outcome: host.Unsupported, Err: err}
 	}

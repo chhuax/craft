@@ -104,12 +104,12 @@ func TestBusyUnowned(t *testing.T) {
 
 func TestPermissions(t *testing.T) {
 	for _, p := range []host.Permissions{{NoNetwork: true}, {WriteScope: host.Worktree}, {WriteScope: host.ReadOnly, Tools: []string{"Bash"}}, {Tools: []string{"--settings"}}} {
-		if _, err := permissionArgs(p); !errors.Is(err, host.Unsupported) {
+		if _, err := permissionArgs(p, ""); !errors.Is(err, host.Unsupported) {
 			t.Fatal(p, err)
 		}
 	}
 	for _, tools := range [][]string{{"Read"}, {}, {"Bash", "Read"}} {
-		args, err := permissionArgs(host.Permissions{Tools: tools})
+		args, err := permissionArgs(host.Permissions{Tools: tools}, "")
 		if err != nil || !slices.Contains(args, "--tools") || !slices.Contains(args, strings.Join(tools, ",")) {
 			t.Fatal(args, err)
 		}

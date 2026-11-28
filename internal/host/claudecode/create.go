@@ -80,7 +80,7 @@ func (d *Driver) Create(ctx context.Context, spec host.CreateSpec) (host.Session
 			return host.Session{}, fmt.Errorf("%w: 发送首条前须登记会话", host.Unsupported)
 		}
 	}
-	perms, err := permissionArgs(spec.Permissions)
+	perms, err := permissionArgs(spec.Permissions, spec.Directory)
 	if err != nil {
 		return host.Session{}, err
 	}

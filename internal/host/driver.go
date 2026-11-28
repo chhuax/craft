@@ -49,7 +49,10 @@ type CreateSpec struct {
 type Permissions struct {
 	WriteScope WriteScope
 	Tools      []string
-	NoNetwork  bool
+	// Commands 是允许经 Bash 运行的命令名（只放行以该名字开头的单条命令，不放行 &&、;、$() 这类复合写法）。
+	// 为空则不开 Bash。开放的 Bash 无法保证只读或目录边界，所以不提供「放开全部」的选项。
+	Commands  []string
+	NoNetwork bool
 }
 
 // WriteScope 描述派工所需的文件边界，零值采用宿主默认权限。
