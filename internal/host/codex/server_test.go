@@ -93,6 +93,7 @@ func serveFixture() error {
 
 func TestLongConnectionAndReconnect(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("CRAFT_HOME", dir)
 	t.Setenv("CODEX_HOME", dir)
 	s := newServer(os.Args[0])
 	t.Cleanup(func() { _ = s.close() })
@@ -126,6 +127,7 @@ func TestLongConnectionAndReconnect(t *testing.T) {
 }
 func TestHandshakeFailure(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("CRAFT_HOME", dir)
 	t.Setenv("CODEX_HOME", dir)
 	if err := os.WriteFile(filepath.Join(dir, "reject"), nil, 0600); err != nil {
 		t.Fatal(err)

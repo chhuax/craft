@@ -3,6 +3,7 @@ package host
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -182,5 +183,23 @@ func TestStalledCommandsHoldSlots(t *testing.T) {
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
+	}
+}
+
+func TestInvalidPassthroughPreventsStart(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CRAFT_HOME", dir)
+	for _, invalid := range []string{"PRIVATE_*", "NAME=value", "", "A B"} {
+		raw, err := json.Marshal(map[string][]string{"envPassthrough": {invalid}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "host.json"), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = Run(t.Context(), os.Args[0], dir, []string{"echo-env"}, nil, "", 10*time.Second, "EXAMPLE_")
+		if !errors.Is(err, Unsupported) {
+			t.Fatalf("无效名称应在启动前被拒绝，得到 %v", err)
+		}
 	}
 }

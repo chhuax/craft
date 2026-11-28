@@ -32,12 +32,12 @@ type Process struct {
 }
 
 // Start 启动原生可执行文件，ctx 控制整棵树的生命周期。binding 只允许覆盖会话绑定。
-// 绝对路径由 daemon 选择；裸命令只从 daemon 的 PATH 解析，禁止在工作目录中找程序。
-func Start(ctx context.Context, program, dir string, args []string, binding map[string]string) (*Process, error) {
-	return startCommand(ctx, program, dir, args, binding, nil)
+// prefixes 只能来自驱动的固定声明。绝对路径由 daemon 选择；裸命令只从 daemon 的 PATH 解析，禁止在工作目录中找程序。
+func Start(ctx context.Context, program, dir string, args []string, binding map[string]string, prefixes ...string) (*Process, error) {
+	return startCommand(ctx, program, dir, args, binding, nil, prefixes)
 }
 
-func startCommand(ctx context.Context, program, dir string, args []string, binding map[string]string, outputRead <-chan struct{}) (*Process, error) {
+func startCommand(ctx context.Context, program, dir string, args []string, binding map[string]string, outputRead <-chan struct{}, prefixes []string) (*Process, error) {
 	if !filepath.IsAbs(program) && filepath.Base(program) != program {
 		return nil, fmt.Errorf("宿主命令须为绝对路径或程序名")
 	}
@@ -51,7 +51,11 @@ func startCommand(ctx context.Context, program, dir string, args []string, bindi
 	if err := checkCommand(cmd); err != nil {
 		return nil, err
 	}
-	cmd.Dir, cmd.Env = dir, commandEnv(binding)
+	env, err := commandEnv(binding, prefixes)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Dir, cmd.Env = dir, env
 	select {
 	case processSlots <- struct{}{}:
 	case <-ctx.Done():
@@ -181,21 +185,21 @@ func (p *Process) Wait() error {
 }
 
 // Run 把输入送到 stdin 并分别限制两路输出；返回的诊断文本可能含宿主数据，不应直接记日志。
-func Run(ctx context.Context, program, dir string, args []string, binding map[string]string, input string, timeout time.Duration) (string, string, error) {
-	return run(ctx, program, dir, args, binding, input, timeout, nil)
+func Run(ctx context.Context, program, dir string, args []string, binding map[string]string, input string, timeout time.Duration, prefixes ...string) (string, string, error) {
+	return run(ctx, program, dir, args, binding, input, timeout, nil, prefixes)
 }
 
 // LaunchBackground 用于宿主自行托管的后台会话。成功退出且关闭两路输出后，由宿主的停止命令接管后代。
-func LaunchBackground(ctx context.Context, program, dir string, args []string, binding map[string]string, timeout time.Duration) (string, error) {
+func LaunchBackground(ctx context.Context, program, dir string, args []string, binding map[string]string, timeout time.Duration, prefixes ...string) (string, error) {
 	outputRead := make(chan struct{})
-	out, _, err := run(ctx, program, dir, args, binding, "", timeout, outputRead)
+	out, _, err := run(ctx, program, dir, args, binding, "", timeout, outputRead, prefixes)
 	return out, err
 }
 
-func run(ctx context.Context, program, dir string, args []string, binding map[string]string, input string, timeout time.Duration, outputRead chan struct{}) (string, string, error) {
+func run(ctx context.Context, program, dir string, args []string, binding map[string]string, input string, timeout time.Duration, outputRead chan struct{}, prefixes []string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	p, err := startCommand(ctx, program, dir, args, binding, outputRead)
+	p, err := startCommand(ctx, program, dir, args, binding, outputRead, prefixes)
 	if err != nil {
 		return "", "", err
 	}

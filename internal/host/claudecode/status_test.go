@@ -47,6 +47,7 @@ func TestMain(m *testing.M) {
 func fixture(t testing.TB) (*Driver, string) {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("CRAFT_HOME", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	t.Setenv("HOME", dir)
 	return New(os.Args[0], nil), filepath.Join(dir, "agents")

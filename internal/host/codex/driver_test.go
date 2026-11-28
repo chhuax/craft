@@ -44,6 +44,18 @@ func (f *fixtureThreads) handle(method string, raw json.RawMessage) (any, error)
 		if _, err := os.Stat(filepath.Join(f.dir, "lose-create-response")); err == nil {
 			return nil, errDisconnect
 		}
+		if p.Env[host.EnvWork] == "environment" {
+			for _, name := range []string{"OPENAI_API_KEY", "CODEX_MODEL", "ALL_PROXY", "no_proxy", "REQUESTS_CA_BUNDLE", "SITE_AUTH"} {
+				if os.Getenv(name) != "allowed" {
+					return nil, fmt.Errorf("缺少 %s", name)
+				}
+			}
+			for _, name := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "DATABASE_PASSWORD", host.EnvSessionID} {
+				if _, ok := os.LookupEnv(name); ok {
+					return nil, fmt.Errorf("误传 %s", name)
+				}
+			}
+		}
 		if p.Cwd != f.dir || p.Sandbox != "read-only" || p.ApprovalPolicy != "never" || os.Getenv(host.EnvHost) != "codex" {
 			return nil, errors.New("线程配置无效")
 		}
@@ -112,6 +124,7 @@ func (f *fixtureThreads) handle(method string, raw json.RawMessage) (any, error)
 func settings(t testing.TB) (*Driver, host.CreateSpec) {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("CRAFT_HOME", dir)
 	t.Setenv("CODEX_HOME", dir)
 	t.Setenv("HOME", dir)
 	d := New(os.Args[0])
@@ -331,5 +344,19 @@ func TestPerThreadBinding(t *testing.T) {
 		if err != nil || s.ID != work {
 			t.Fatal(s, err)
 		}
+	}
+}
+
+func TestEnvironment(t *testing.T) {
+	d, spec := settings(t)
+	for _, name := range []string{"OPENAI_API_KEY", "CODEX_MODEL", "ALL_PROXY", "no_proxy", "REQUESTS_CA_BUNDLE", "SITE_AUTH", "ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "DATABASE_PASSWORD", host.EnvSessionID, host.EnvCodexThreadID, host.EnvAssignment, host.EnvWork} {
+		t.Setenv(name, "allowed")
+	}
+	if err := os.WriteFile(filepath.Join(spec.Directory, "host.json"), []byte(`{"envPassthrough":["SITE_AUTH","CODEX_THREAD_ID","CRAFT_SESSION_ID","CRAFT_ASSIGNMENT_ID","CRAFT_WORK_ID"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	spec.Env = map[string]string{host.EnvWork: "environment", host.EnvAssignment: "a-environment"}
+	if _, err := d.Create(t.Context(), spec); err != nil {
+		t.Fatal(err)
 	}
 }

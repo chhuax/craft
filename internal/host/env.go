@@ -1,6 +1,16 @@
 package host
 
-import "os"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"slices"
+	"strings"
+)
 
 // 会话号返回前可传宿主、角色、Work 与派工。EnvSessionID 只在宿主已确认 ID 后传给后续命令。
 // 环境来自调用方，不能充当人的授权；CLI 仍须核对本地派工与宿主会话。
@@ -29,12 +39,79 @@ func BindingEnv(s Session, env map[string]string) map[string]string {
 	return binding
 }
 
-// commandEnv 从父进程逐项取运行必需的目录及路径；调用方不能覆盖 PATH、宿主配置或加载器。
-func commandEnv(binding map[string]string) []string {
-	env := make([]string, 0, 24)
-	for _, key := range []string{"PATH", "HOME", "USERPROFILE", "SystemRoot", "LOCALAPPDATA", "APPDATA", "TMPDIR", "TEMP", "TMP", "LANG", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CRAFT_HOME"} {
-		if value, ok := os.LookupEnv(key); ok {
-			env = append(env, key+"="+value)
+var variableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func siteEnvironment() ([]string, error) {
+	dir := os.Getenv("CRAFT_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("定位宿主配置: %w", err)
+		}
+		dir = filepath.Join(home, ".craft")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "host.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("读取 host.json: %w", err)
+	}
+	var config struct {
+		Names []string `json:"envPassthrough"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return nil, fmt.Errorf("解析 host.json: %w", err)
+	}
+	for _, key := range config.Names {
+		if !variableName.MatchString(key) {
+			// 无效项可能包含用户误填的凭据，不能把值带进诊断。
+			return nil, errors.New("host.json 的 envPassthrough 只接受环境变量名")
+		}
+	}
+	return config.Names, nil
+}
+
+var baseEnvironment = []string{
+	"PATH", "HOME", "USERPROFILE", "SystemRoot", "LOCALAPPDATA", "APPDATA", "TMPDIR", "TEMP", "TMP", "LANG", "CRAFT_HOME",
+	"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+	"SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE",
+}
+
+func envKey(s string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToUpper(s)
+	}
+	return s
+}
+
+// 前缀由驱动声明，站点只能逐项加入名称。绑定只从本次派工读取，不能从 daemon 借用。
+func commandEnv(binding map[string]string, prefixes []string) ([]string, error) {
+	var site []string
+	if len(prefixes) > 0 {
+		var err error
+		site, err = siteEnvironment()
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", Unsupported, err)
+		}
+	}
+	names := make(map[string]bool, len(baseEnvironment)+len(site))
+	for _, name := range baseEnvironment {
+		names[envKey(name)] = true
+	}
+	for _, name := range site {
+		names[envKey(name)] = true
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		key = envKey(key)
+		switch key {
+		case EnvHost, EnvSessionID, EnvAssignment, EnvWork, EnvRole, EnvCodexThreadID:
+			continue
+		}
+		if names[key] || slices.ContainsFunc(prefixes, func(prefix string) bool { return strings.HasPrefix(key, prefix) }) {
+			env = append(env, entry)
 		}
 	}
 	for _, key := range []string{EnvHost, EnvRole, EnvSessionID, EnvWork, EnvAssignment} {
@@ -42,5 +119,5 @@ func commandEnv(binding map[string]string) []string {
 			env = append(env, key+"="+value)
 		}
 	}
-	return env
+	return env, nil
 }

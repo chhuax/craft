@@ -98,9 +98,9 @@ func (d *Driver) Create(ctx context.Context, spec host.CreateSpec) (host.Session
 		return host.Session{}, err
 	}
 	binding := host.BindingEnv(host.Session{Host: hostName}, spec.Env)
-	out, err := host.LaunchBackground(ctx, d.program, spec.Directory, args, binding, 30*time.Second)
+	out, err := host.LaunchBackground(ctx, d.program, spec.Directory, args, binding, 30*time.Second, envPrefixes...)
 	if err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
+		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, host.Unsupported) {
 			return host.Session{}, fmt.Errorf("启动 Claude Code: %w", err)
 		}
 		return host.Session{}, fmt.Errorf("%w: 请按标题 %q 核对后台清单: %w", host.Unknown, title, err)

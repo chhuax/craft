@@ -126,7 +126,7 @@ func (d *Driver) resume(ctx, life context.Context, s host.Session, cancel contex
 	args = append([]string{"--resume", s.ID}, args...)
 	args = append(args, "--input-format", "stream-json", "--output-format", "stream-json", "--replay-user-messages", "--verbose", "-p")
 	stop := context.AfterFunc(ctx, cancel)
-	p, err := host.Start(life, d.program, spec.Directory, args, host.BindingEnv(s, spec.Env))
+	p, err := host.Start(life, d.program, spec.Directory, args, host.BindingEnv(s, spec.Env), envPrefixes...)
 	stop()
 	if err != nil {
 		cancel()

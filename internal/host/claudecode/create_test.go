@@ -16,10 +16,21 @@ func serveCreate() error {
 	if len(os.Args) != 6 || os.Args[2] != "--name" || !slices.Equal(os.Args[4:], []string{"--output-format", "json"}) {
 		return errors.New("后台创建参数无效")
 	}
-	if os.Getenv(host.EnvHost) != hostName || os.Getenv(host.EnvSessionID) != "" || os.Getenv(host.EnvAssignment) != "a" || os.Getenv(host.EnvWork) != "w" || os.Getenv("PRIVATE_TOKEN") != "" {
+	if os.Getenv(host.EnvRole) != "worker" || os.Getenv(host.EnvHost) != hostName || os.Getenv(host.EnvSessionID) != "" || os.Getenv(host.EnvAssignment) != "a" || os.Getenv(host.EnvWork) != "w" || os.Getenv("PRIVATE_TOKEN") != "" {
 		return errors.New("新会话绑定错误")
 	}
 	switch os.Args[3] {
+	case "environment":
+		for _, name := range []string{"ANTHROPIC_API_KEY", "CLAUDE_MODEL", "HTTPS_PROXY", "http_proxy", "SSL_CERT_FILE", "SITE_AUTH"} {
+			if os.Getenv(name) != "allowed" {
+				return fmt.Errorf("缺少 %s", name)
+			}
+		}
+		for _, name := range []string{"OPENAI_API_KEY", "CODEX_HOME", "DATABASE_PASSWORD", host.EnvCodexThreadID} {
+			if _, ok := os.LookupEnv(name); ok {
+				return fmt.Errorf("误传 %s", name)
+			}
+		}
 	case "fail":
 		return errors.New("创建失败")
 	case "unknown":
@@ -93,5 +104,19 @@ func BenchmarkCreate(b *testing.B) {
 		if err != nil || s.ID != exampleID {
 			b.Fatal(s, err)
 		}
+	}
+}
+
+func TestEnvironment(t *testing.T) {
+	d, spec := creation(t)
+	for _, name := range []string{"ANTHROPIC_API_KEY", "CLAUDE_MODEL", "HTTPS_PROXY", "http_proxy", "SSL_CERT_FILE", "SITE_AUTH", "OPENAI_API_KEY", "CODEX_HOME", "DATABASE_PASSWORD", host.EnvCodexThreadID, host.EnvHost, host.EnvRole, host.EnvWork, host.EnvAssignment} {
+		t.Setenv(name, "allowed")
+	}
+	if err := os.WriteFile(filepath.Join(spec.Directory, "host.json"), []byte(`{"envPassthrough":["SITE_AUTH","CRAFT_SESSION_ID","CRAFT_WORK_ID","CRAFT_ASSIGNMENT_ID","CRAFT_WATCH_ROLE","CRAFT_SESSION_HOST","CODEX_THREAD_ID"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	spec.Title = "environment"
+	if _, err := d.Create(t.Context(), spec); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -17,6 +17,8 @@ import (
 
 const hostName = "claude-code"
 
+var envPrefixes = []string{"ANTHROPIC_", "CLAUDE_"}
+
 var uuid = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 type agent struct {
@@ -112,7 +114,7 @@ func (d *Driver) list(ctx context.Context, fresh bool) (map[string]agent, error)
 	if !fresh && d.now().Before(d.validUntil) {
 		return d.agents, d.listErr
 	}
-	out, _, err := host.Run(ctx, d.program, "", []string{"agents", "--json", "--all"}, nil, "", 10*time.Second)
+	out, _, err := host.Run(ctx, d.program, "", []string{"agents", "--json", "--all"}, nil, "", 10*time.Second, envPrefixes...)
 	if err == nil {
 		d.agents, err = parseAgents(out)
 	}
@@ -196,7 +198,7 @@ func (d *Driver) Stop(ctx context.Context, s host.Session, timeout time.Duration
 	if !shortID.MatchString(a.ID) {
 		return fmt.Errorf("%w: 缺少可信后台短号", host.Unknown)
 	}
-	out, diag, err := host.Run(ctx, d.program, "", []string{"stop", a.ID}, nil, "", timeout)
+	out, diag, err := host.Run(ctx, d.program, "", []string{"stop", a.ID}, nil, "", timeout, envPrefixes...)
 	if err != nil {
 		if strings.Contains(strings.ToLower(diag+out), "no job matching") {
 			return nil

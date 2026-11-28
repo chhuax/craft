@@ -34,7 +34,7 @@ func (d *Driver) Create(ctx context.Context, spec host.CreateSpec) (host.Session
 		"env": host.BindingEnv(host.Session{Host: hostName}, spec.Env)}
 	var r response
 	if err := d.s.call(ctx, "thread/start", params, &r); err != nil {
-		if errors.Is(err, host.Later) {
+		if errors.Is(err, host.Later) || errors.Is(err, host.Unsupported) {
 			return host.Session{}, err
 		}
 		return host.Session{}, fmt.Errorf("%w: 创建回执缺失，请在 thread/list 核对目录与标题 %q: %w", host.Unknown, spec.Title, err)

@@ -122,10 +122,12 @@ func (s *server) connect(ctx context.Context) (*connection, error) {
 	defer stopClose()
 	stopCancel := context.AfterFunc(ctx, cancel)
 	defer stopCancel()
-	p, err := host.Start(life, s.program, "", []string{"app-server"}, host.BindingEnv(host.Session{Host: hostName}, nil))
+	p, err := host.Start(life, s.program, "", []string{"app-server"}, host.BindingEnv(host.Session{Host: hostName}, nil), "OPENAI_", "CODEX_")
 	if err != nil {
 		cancel()
-		s.backoff()
+		if !errors.Is(err, host.Unsupported) {
+			s.backoff()
+		}
 		return nil, err
 	}
 	c := &connection{proc: p, rpc: exthost.NewConn(newFrames(p.Stdout), p.Stdin, nil, frameLimit+32), started: s.now()}
@@ -198,6 +200,9 @@ func (s *server) call(ctx context.Context, method string, params, result any) er
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	c, err := s.connect(ctx)
+	if errors.Is(err, host.Unsupported) {
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("%s 发送前: %w", method, errors.Join(host.Later, err))
 	}
