@@ -13,12 +13,14 @@ import (
 
 	"github.com/chhuax/craft/internal/app"
 	"github.com/chhuax/craft/internal/engine"
+	"github.com/chhuax/craft/pkg/protocol"
 )
 
 type role int
 
 const (
 	local role = iota
+	anySession
 	reader
 	person
 	worker
@@ -65,6 +67,11 @@ func commands() []commandSpec {
 		{"daemon start", "", "", person, daemonStart},
 		{"daemon stop", "", "[--force]", person, daemonStop},
 		{"daemon status", "", "", reader, daemonStatus},
+		{"act", "<action>", "--params JSON [--yes] [--key KEY]", anySession, outboundCommand},
+		{"outbox list", "", "", reader, daemonRPC},
+		{"outbox show", "<id>", "", reader, daemonRPC},
+		{"outbox confirm", "<id>", "[--yes]", person, outboundCommand},
+		{"outbox withdraw", "<id>", "", person, outboundCommand},
 		{"alarm list", "", "", reader, daemonRPC},
 		{"alarm run", "<ext> <alarm>", "[--wait [SEC]]", person, alarmRun},
 		{"ext enable", "<id>", "", settings, daemonRPC},
@@ -240,7 +247,7 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 		switch {
 		case spec.role == worker && (binding == nil || binding.Session.Host == "" || binding.Session.ID == "" || binding.Assignment == ""):
 			err = fmt.Errorf("%w: 需要宿主提供当前 worker 会话及派工绑定", errDenied)
-		case spec.role != worker && binding != nil:
+		case spec.role != worker && spec.role != anySession && binding != nil:
 			err = fmt.Errorf("%w: 执行方只能操作自己的 Work", errDenied)
 		default:
 			i.home, err = app.StateHome(getenv, userHomeDir)
@@ -296,10 +303,18 @@ func failure(w io.Writer, asJSON bool, err error) int {
 			code, exit = "unavailable", 6
 		}
 	}
+	var publicDetail any = detail
+	message = clipText(message)
+	if remote, ok := errors.AsType[*protocol.Error](err); ok && remote.Data != nil {
+		publicDetail = *remote.Data
+		if !asJSON {
+			message += "\n" + string(*remote.Data)
+		}
+	}
 	if asJSON {
-		err = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]any{"code": code, "message": clipText(message), "detail": detail}})
+		err = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]any{"code": code, "message": message, "detail": publicDetail}})
 	} else {
-		_, err = fmt.Fprintln(w, clipText(message))
+		_, err = fmt.Fprintln(w, message)
 	}
 	if err != nil {
 		return 1

@@ -144,6 +144,10 @@ func rpcFailure(err error) (string, int) {
 		return "internalError", 1
 	}
 	switch e.Code {
+	case needsConfirmationCode:
+		return "needs_confirmation", 3
+	case protocol.ActionDenied:
+		return "denied", 4
 	case -32602:
 		return "invalidArguments", 2
 	case -32004:

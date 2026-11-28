@@ -550,3 +550,10 @@ func TestWorkReadsOnlyReachedPages(t *testing.T) {
 		}
 	}
 }
+
+func TestOutboundNeedsDaemon(t *testing.T) {
+	home := t.TempDir()
+	for _, args := range [][]string{{"act", "write", "--params", "{}", "--yes"}, {"outbox", "list"}, {"outbox", "show", "k"}, {"outbox", "confirm", "k", "--yes"}, {"outbox", "withdraw", "k"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) { command(t, home, 6, args...) })
+	}
+}

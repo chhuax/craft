@@ -27,6 +27,9 @@ func TestMain(m *testing.M) {
 		switch os.Args[1] {
 		case "daemon":
 			os.Exit(Run(os.Args[1:], "dev", os.Stdout, os.Stderr))
+		case "--action-fixture":
+			runActionFixture()
+			os.Exit(0)
 		case "--alarm-fixture":
 			ready := make(chan *exthost.Conn, 1)
 			var first sync.Once
@@ -339,7 +342,7 @@ func TestInterfaceGuards(t *testing.T) {
 		{"POST", "/rpc", "localhost:12345", st.Token, "application/json", false, true, 413},
 		{"POST", "/rpc", "localhost:12345", st.Token, "application/json", false, false, 200},
 	} {
-		body := `{"jsonrpc":"2.0","method":"outbox.list","id":1}`
+		body := `{"jsonrpc":"2.0","method":"unknown","id":1}`
 		if tc.oversize {
 			body += strings.Repeat(" ", maxRPCBody)
 		}

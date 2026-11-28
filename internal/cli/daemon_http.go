@@ -106,7 +106,11 @@ func (a *localAPI) rpc(w http.ResponseWriter, r *http.Request) {
 			reply.Error = publicRPCError(err)
 		}
 	}
-	if len(reply.Result)+len(reply.ID) > maxResponse-128 {
+	size := len(reply.Result) + len(reply.ID)
+	if reply.Error != nil && reply.Error.Data != nil {
+		size += len(*reply.Error.Data)
+	}
+	if size > maxResponse-128 {
 		reply.Result = nil
 		reply.Error = rpcError(-32603, "结果超过单页上限")
 	}
@@ -152,10 +156,9 @@ type rpcParams struct {
 }
 
 func (a *localAPI) dispatch(ctx context.Context, req protocol.Request) (any, error) {
-	// 对外写尚未接线，即使带有业务参数也必须得到一致的未知方法响应。
 	switch req.Method {
 	case "act", "outbox.list", "outbox.show", "outbox.confirm", "outbox.withdraw":
-		return nil, rpcError(-32601, "方法不存在")
+		return a.action(ctx, req)
 	}
 	var p rpcParams
 	bad := rpcError(-32602, "参数无效")
