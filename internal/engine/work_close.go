@@ -4,14 +4,6 @@ import "slices"
 
 // 无跟随时只有执行方的 ready 能证明完成；有自有对象时结果取最后一次关闭事实。
 func followsDone(w *Work) *ThreadClose {
-	if len(w.Follows) == 0 {
-		if n := len(w.Assignments); n > 0 {
-			if r := w.Assignments[n-1].Report; r != nil && r.State == Ready {
-				return &ThreadClose{At: r.At, Outcome: string(Completed)}
-			}
-		}
-		return nil
-	}
 	var last *ThreadClose
 	for i := range w.Follows {
 		f := &w.Follows[i]
@@ -23,6 +15,11 @@ func followsDone(w *Work) *ThreadClose {
 		}
 		if last == nil || f.Closed.At >= last.At {
 			last = f.Closed
+		}
+	}
+	if last == nil && len(w.Assignments) > 0 {
+		if r := w.Assignments[len(w.Assignments)-1].Report; r != nil && r.State == Ready {
+			return &ThreadClose{At: r.At, Outcome: string(Completed)}
 		}
 	}
 	return last

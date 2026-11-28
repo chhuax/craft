@@ -18,6 +18,8 @@ func TestFollowsDone(t *testing.T) {
 		{"无跟随无报告", nil, "", nil},
 		{"无跟随未就绪", nil, Blocked, nil},
 		{"无跟随就绪", nil, Ready, &ThreadClose{At: at2, Outcome: "completed"}},
+		{"仅旁观且就绪", []Follow{{Thread: "side"}}, Ready, &ThreadClose{At: at2, Outcome: "completed"}},
+		{"仅旁观未就绪", []Follow{{Thread: "side"}}, Progress, nil},
 		{"自有对象尚未关闭", []Follow{{Own: true}}, Ready, nil},
 		{"自有对象部分关闭", []Follow{{Own: true, Closed: &last}, {Own: true}}, Ready, nil},
 		{"自有对象全部关闭", []Follow{{Own: true, Closed: &last}, {Own: true, Closed: &first}, {Own: false}}, Ready, &last},
