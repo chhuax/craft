@@ -23,15 +23,30 @@ func denied(reason string) error {
 }
 
 type actionArgs struct {
-	Repo                    string `json:"repo"`
-	Number                  int    `json:"number"`
+	Thread                  json.RawMessage `json:"thread"`
+	Repo                    string          `json:"repo"`
+	Number                  int             `json:"number"`
 	Title, Body, Head, Base string
 	WorkID                  string `json:"workId"`
 }
 
 func validateAction(p protocol.ActionExecuteParams) (actionArgs, string, string, error) {
 	var a actionArgs
-	if json.Unmarshal(p.Params, &a) != nil || !validRepo(a.Repo) {
+	if err := json.Unmarshal(p.Params, &a); err != nil {
+		return a, "", "", invalid("动作参数无效")
+	}
+	if p.Action == "pr:comment" && a.Thread != nil {
+		var id string
+		if a.Repo != "" || a.Number != 0 || json.Unmarshal(a.Thread, &id) != nil {
+			return a, "", "", invalid("评论需要单一的 thread 或 repo/number 目标")
+		}
+		o, err := parseObject(protocol.ThreadRef{Source: "github", Kind: "pull_request", ID: id})
+		if err != nil {
+			return a, "", "", err
+		}
+		a.Repo, a.Number = o.repo, o.n
+	}
+	if !validRepo(a.Repo) {
 		return a, "", "", invalid("需要有效的 repo（owner/repo）")
 	}
 	if p.Action != "pr:get" && p.IdempotencyKey == "" {

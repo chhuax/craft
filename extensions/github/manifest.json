@@ -31,5 +31,5 @@
     {"id": "pr:create", "level": "confirm", "reversible": false},
     {"id": "pr:merge", "level": "confirm_named", "reversible": false}
   ],
-  "ports": {"channels": ["github"]}
+  "ports": {"channels": [{"id": "github", "replyAction": "pr:comment"}]}
 }
