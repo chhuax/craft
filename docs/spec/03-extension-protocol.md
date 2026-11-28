@@ -114,6 +114,16 @@
 - 同一主版本内只加字段、加方法，不删不改语义；未知字段必须忽略。
 - `pkg/protocol` 提供 Go 类型与 JSON Schema；**一致性测试套件**（`craft ext test <path>`）用录制 fixture 驱动扩展，检查 §5 的硬约定，让第三方扩展自测。
 
+### 一致性测试的 fixture 格式（`craft ext test`）
+
+fixture 目录（默认 `<扩展目录>/testdata/conformance/`）：
+
+- `http/*.json`：录制的上游响应。每个文件是 `{method, path, query?, status, headers?, body}` 或这些对象的数组。测试台起一个本地 HTTP 重放服务器（`127.0.0.1` 随机端口），按 method + path + query 匹配；未匹配的请求返回 599 并记为失败。
+  - **`query` 的值可以写成 `"*"`**：表示该参数必须出现、取值任意。用于扩展按当前时间生成的参数（如 `since`）。测试台仍记录实际取值，`expect.json` 的 `lookback.param` 核对七天窗口时用的就是记录下来的值。
+  - **时间占位符**：fixture 文件里（响应正文、响应头、`config.json` 的字符串值）可以写 `${CRAFT_FIXTURE_NOW}` 或带偏移的 `${CRAFT_FIXTURE_NOW-5m}`、`${CRAFT_FIXTURE_NOW+1h}`（偏移用 Go 的时长写法），**在加载 fixture 时**展开成 RFC 3339 UTC 时间（毫秒精度）。用于录制数据里的 `updated_at`、`merged_at` 这类相对「现在」才有意义的时间——写死的时间会随真实时间流逝落到扩展的回看窗口之外。**「现在」在一次 `craft ext test` 里只取一次**，所有重放轮次用同一个值（否则事件 id 若含时间，检查 ④ 会无故失败）；测试里可注入。
+- `config.json`：扩展的不透明配置，其中字符串里的占位符 `${CRAFT_FIXTURE_HTTP}` 被替换成重放服务器地址，作为 `initialize.config` 交给扩展。
+- `expect.json`（可选）：`{"threadIds": ["<kind>:<id>", ...], "lookback": {"param": "<查询参数名>"}}`。缺失的字段对应的检查记 `skip` 并说明原因，不假装通过。
+
 ## 7. 参考实现
 
 v1 仓库内带一个参考扩展 `extensions/github`（Go 实现，只用公开协议与公开 API），覆盖：PR 评审请求、CI 失败、PR 合并、评审评论、对外写 `pr:comment` / `pr:create`。它同时是协议的示例与一致性测试的被测对象。
