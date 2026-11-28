@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 const JSONRPCVersion = "2.0"
 
@@ -33,3 +36,6 @@ type Error struct {
 	Message string           `json:"message"`
 	Data    *json.RawMessage `json:"data,omitempty"`
 }
+
+// Error 让调用方可用 errors.As 取回远端错误码和原始详情。
+func (e *Error) Error() string { return fmt.Sprintf("RPC %d: %s", e.Code, e.Message) }

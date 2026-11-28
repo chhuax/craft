@@ -54,6 +54,13 @@ func TestJSONRoundTrip(t *testing.T) {
 		{"空结果", `{"jsonrpc":"2.0","id":9007199254740993,"result":null}`, &Response{}},
 		{"错误响应", `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"解析错误","data":{"offset":1}}}`, &Response{}},
 		{"无详情错误", `{"code":-32601,"message":"方法不存在"}`, &Error{}},
+		{"握手", `{"protocol":1,"kernelVersion":"v1","config":{},"stateDir":"state"}`, &InitializeParams{}},
+		{"能力", `{"ok":true,"capabilities":{"future":true}}`, &InitializeResult{}},
+		{"闹钟调用", `{"alarmId":"daily","reason":"startup","scheduledAtMs":123}`, &AlarmRunParams{}},
+		{"执行动作", `{"action":"send","params":{"n":9007199254740993},"preview":false,"idempotencyKey":"abc"}`, &ActionExecuteParams{}},
+		{"核实动作", `{"action":"send","idempotencyKey":"abc"}`, &ActionVerifyParams{}},
+		{"读取上下文", `{"thread":{"source":"demo","kind":"item","id":"a"},"trigger":"e","resource":{"id":1},"cursor":"next","messageId":"m"}`, &ContextReadParams{}},
+		{"上下文可选字段", `{"thread":{"source":"demo","kind":"item","id":"a"}}`, &ContextReadParams{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.wire), tc.target); err != nil {
