@@ -1,0 +1,35 @@
+{
+  "id": "github",
+  "version": "0.1.0",
+  "protocol": 1,
+  "exec": ["./craft-ext-github"],
+  "alarms": [
+    {"id": "inbox", "every": "5m", "jitter": "30s", "timeout": "2m", "default_enabled": true},
+    {"id": "subscribed", "every": "5m", "timeout": "2m", "default_enabled": true}
+  ],
+  "alarm_limits": {"concurrency": 1},
+  "watch_sources": [{
+    "id": "github",
+    "thread_kinds": [
+      {"id": "pull_request", "closable": true, "object_type": "github.pull-request"},
+      {"id": "issue", "closable": true, "object_type": "github.issue"}
+    ],
+    "events": [
+      {"id": "pr.review_requested", "label": "请我评审", "strength": "explicit", "default": "observe", "no_target": "scratch", "rule": {"name": "评审 PR", "instruction": "检查变更及其验证结果，给出评审意见。"}, "verb": "评审"},
+      {"id": "pr.review_comment", "label": "PR 评论", "strength": "inferred", "default": "auto", "followup_only": true, "on_unmatched": "record"},
+      {"id": "pr.ci_failed", "label": "PR 检查失败", "strength": "inferred", "default": "auto", "followup_only": true, "on_unmatched": "filter"},
+      {"id": "pr.merged", "label": "PR 已合并", "strength": "inferred", "default": "auto", "followup_only": true, "on_unmatched": "record"},
+      {"id": "pr.closed", "label": "PR 已关闭", "strength": "inferred", "default": "auto", "followup_only": true, "on_unmatched": "record"},
+      {"id": "issue.assigned", "label": "指派给我", "strength": "explicit", "default": "observe"},
+      {"id": "issue.comment", "label": "议题评论", "strength": "inferred", "default": "auto", "followup_only": true, "on_unmatched": "record"}
+    ],
+    "facts": ["title", "state", "due", "urgency"]
+  }],
+  "actions": [
+    {"id": "pr:get", "level": "auto", "read_only": true},
+    {"id": "pr:comment", "level": "auto", "reversible": true},
+    {"id": "pr:create", "level": "confirm", "reversible": false},
+    {"id": "pr:merge", "level": "confirm_named", "reversible": false}
+  ],
+  "ports": {"channels": ["github"]}
+}
