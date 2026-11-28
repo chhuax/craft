@@ -150,7 +150,7 @@ Effect { kind, key, value(JSON), seq, generation, attempts, error, due, since } 
 ## 9. 外发事件与待人处理
 
 - **外发事件**是内核对外发出的「状态变了」，**不是** Watch 盯的事件，永远不进 inbox、不成为 Trigger、不进研判：`{rev, type, at, ref, data}`。与状态变更同事务落盘，提交后进程内广播；跨进程按 `rev` 补拉。只用于通知与展示，不得驱动领域逻辑。
-- **待人处理清单** `attention()`：纯函数，从当前状态现算，处理掉就自然消失。每项 `{id, kind, severity, ref, title, detail, actions[], at}`，kind 为 `answer|review|blocked|failed|delivery|unavailable|suggestion|health`。
+- **待人处理清单** `attention()`：纯函数，从当前状态现算，处理掉就自然消失。每项 `{id, kind, severity, ref, title, detail, actions[], at}`，kind 为 `answer|review|blocked|failed|delivery|unavailable|suggestion|health|confirm`；`confirm`（待确认的对外写）由 outbound 产生，app 层与引擎算出的清单合并后再排序（见 docs/open-questions.md Q16）。
 
 ## 10. 存储
 

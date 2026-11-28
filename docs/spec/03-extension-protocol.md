@@ -38,7 +38,8 @@
   }],
   "actions": [
     { "id": "pr:comment", "level": "auto",    "reversible": true },
-    { "id": "pr:create",  "level": "confirm", "reversible": false }
+    { "id": "pr:create",  "level": "confirm", "reversible": false },
+    { "id": "pr:get",     "level": "auto",    "read_only": true }
   ],
   "ports": { "assessor": false, "executors": [], "preparers": [], "channels": ["github"] },
   "placement_rules": [],
@@ -47,6 +48,7 @@
 ```
 
 - manifest 字段一律顶层、snake_case。
+- **动作（`actions[]`）**：`id`（**全局唯一**，跨扩展重复则争用各方都被拒绝加载，和事件键一致；动作 id 允许含冒号，如 `pr:comment`）、`level`（`auto|confirm|confirm_named|deny`）、`reversible`、`read_only`（缺省 false；登记为只读的动作不经分级直接放行，见 04 §5）。未登记的动作按 `confirm` 处理。
 - 事件目录项：`id`、`label`、`default`（`off|observe|auto`）、`strength`（`explicit|inferred`）、`followup_only`、`on_unmatched`（`filter|record`）、`feed_tier`（`notice|digest`）、`rule`、`verb`（≤6 字，仅展示）、`no_target`（`scratch`）、`collapse`（`{group, by?}`，投递时合并同类事件）。
 - 非法值在加载 manifest 时拒绝。事件类型按 `<source>:<event>` 全局唯一。
 - **标识里不许含冒号**：扩展 `id`、闹钟 `id`、`watch_sources[].id`、`thread_kinds[].id` 在加载时拒绝 `:`。内核用冒号拼接这些标识得到库键（`<source>:<kind>:<id>`、`<ext>:<alarm>`、`<source>:<event>`），标识里有冒号会让不同的引用拼出同一个键，权限检查就被绕过。对象自己的 `id`（`ThreadRef.id`）允许含冒号——前面的各段不含冒号时，拼出的键仍可唯一还原。
