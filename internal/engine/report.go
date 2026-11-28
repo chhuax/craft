@@ -153,7 +153,11 @@ func withdrawQuestion(u Unit, q *Question) error {
 		return err
 	}
 	if status == ReplyPending || status == ReplyConfirm {
-		return u.PutReplyStatus(id, ReplyDropped)
+		if err := u.PutReplyStatus(id, ReplyDropped); err != nil {
+			return err
+		}
+		// 覆盖正在预览的代次；即使旧 effect 已交给 outbox，也要唤醒渠道撤回待确认项。
+		return enqueueEffect(u, "reply", id, OutboundMessage{ID: id})
 	}
 	return nil
 }

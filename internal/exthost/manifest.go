@@ -25,11 +25,13 @@ type Manifest struct {
 	AlarmLimits struct {
 		Concurrency *int `json:"concurrency"`
 	} `json:"alarm_limits"`
-	WatchSources   []WatchSource   `json:"watch_sources"`
-	Actions        []ActionDecl    `json:"actions"`
-	Ports          json.RawMessage `json:"ports"`
-	PlacementRules json.RawMessage `json:"placement_rules"`
-	Views          json.RawMessage `json:"views"`
+	WatchSources []WatchSource   `json:"watch_sources"`
+	Actions      []ActionDecl    `json:"actions"`
+	Ports        json.RawMessage `json:"ports"`
+	// Channels 的空动作表示仅接收。Ports 仍保留第三方端口的原始声明。
+	Channels       map[string]string `json:"-"`
+	PlacementRules json.RawMessage   `json:"placement_rules"`
+	Views          json.RawMessage   `json:"views"`
 }
 
 // ActionDecl 用全局标识声明动作归属和确认要求。
@@ -248,9 +250,9 @@ func (m *Manifest) validate() error {
 		}
 		alarms[a.ID] = true
 	}
-	actions := make(map[string]bool)
+	actions := make(map[string]ActionDecl)
 	for _, a := range m.Actions {
-		if a.ID == "" || actions[a.ID] {
+		if _, exists := actions[a.ID]; a.ID == "" || exists {
 			return fmt.Errorf("actions.id 为空或重复 %q", a.ID)
 		}
 		switch a.Level {
@@ -258,7 +260,10 @@ func (m *Manifest) validate() error {
 		default:
 			return fmt.Errorf("actions[%q].level 无效 %q", a.ID, a.Level)
 		}
-		actions[a.ID] = true
+		actions[a.ID] = a
+	}
+	if err := m.parseChannels(actions); err != nil {
+		return err
 	}
 	events := make(map[string]bool)
 	for i := range m.WatchSources {
@@ -294,3 +299,39 @@ func (m *Manifest) validate() error {
 }
 
 func validID(s string) bool { return filepath.IsLocal(s) && s != "." && s == filepath.Base(s) }
+
+func (m *Manifest) parseChannels(actions map[string]ActionDecl) error {
+	if len(m.Ports) == 0 || jsontext.Value(m.Ports).Kind() == 'n' {
+		return nil
+	}
+	var ports struct {
+		Channels []json.RawMessage `json:"channels"`
+	}
+	if err := jsonv2.Unmarshal(m.Ports, &ports, manifestTypes); err != nil {
+		return fmt.Errorf("ports.channels: %w", err)
+	}
+	m.Channels = make(map[string]string, len(ports.Channels))
+	for i, raw := range ports.Channels {
+		var channel struct {
+			ID          string `json:"id"`
+			ReplyAction string `json:"replyAction"`
+		}
+		if jsontext.Value(raw).Kind() == '"' {
+			if err := jsonv2.Unmarshal(raw, &channel.ID); err != nil {
+				return fmt.Errorf("ports.channels[%d]: %w", i, err)
+			}
+		} else {
+			if err := jsonv2.Unmarshal(raw, &channel, manifestTypes); err != nil {
+				return fmt.Errorf("ports.channels[%d]: %w", i, err)
+			}
+			if a, ok := actions[channel.ReplyAction]; !ok || a.ReadOnly {
+				return fmt.Errorf("ports.channels[%d].replyAction %q 必须是本扩展声明的写动作", i, channel.ReplyAction)
+			}
+		}
+		if _, exists := m.Channels[channel.ID]; strings.TrimSpace(channel.ID) == "" || exists {
+			return fmt.Errorf("ports.channels[%d].id 为空或重复 %q", i, channel.ID)
+		}
+		m.Channels[channel.ID] = channel.ReplyAction
+	}
+	return nil
+}

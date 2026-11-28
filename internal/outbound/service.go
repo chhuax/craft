@@ -123,7 +123,7 @@ func (s *Service) Act(ctx context.Context, q Request) (Result, error) {
 			return Result{}, err
 		}
 	}
-	if r.Action != q.Action || !sameParams(r.Params, q.Params) {
+	if !r.MatchesRequest(q) {
 		return r, fmt.Errorf("幂等键 %q 已绑定其他请求: %w", r.ID, ErrConflict)
 	}
 	switch r.State {
@@ -134,6 +134,11 @@ func (s *Service) Act(ctx context.Context, q Request) (Result, error) {
 	default:
 		return r, fmt.Errorf("外发记录 %q 处于 %s: %w", r.ID, r.State, ErrConflict)
 	}
+}
+
+// MatchesRequest 供调用方区分同一请求的状态冲突与幂等键被另一请求占用。
+func (r Result) MatchesRequest(q Request) bool {
+	return r.ID == q.IdempotencyKey && r.Action == q.Action && sameParams(r.Params, q.Params)
 }
 
 func sameParams(a, b json.RawMessage) bool {

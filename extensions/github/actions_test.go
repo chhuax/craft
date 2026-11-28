@@ -83,6 +83,9 @@ func TestActionsThroughRPC(t *testing.T) {
 	})
 	for _, action := range []string{"pr:get", "pr:create", "pr:merge", "pr:comment"} {
 		p := args(action)
+		if action == "pr:comment" {
+			p["params"] = map[string]string{"thread": repo + "#5", "body": "评审意见"}
+		}
 		p["preview"] = true
 		var preview struct {
 			Summary, Target string
@@ -306,6 +309,24 @@ func TestAssignedBotsAndEcho(t *testing.T) {
 		}
 		if len(ts) != 1 || ts[0].Event != "issue.assigned" || ts[0].Human != (i == 3) || ts[0].Addressed == nil || *ts[0].Addressed != "direct" {
 			t.Fatal(ts)
+		}
+	}
+}
+
+func TestCommentThread(t *testing.T) {
+	for _, tc := range []struct {
+		params string
+		valid  bool
+	}{
+		{`{"thread":"north/demo#5","body":"收到"}`, true},
+		{`{"repo":"north/demo","number":5,"body":"收到"}`, true},
+		{`{"thread":"north/demo#05","body":"收到"}`, false},
+		{`{"thread":"north/demo#5","repo":"north/other","number":7,"body":"收到"}`, false},
+		{`{"thread":null,"repo":"north/demo","number":5,"body":"收到"}`, false},
+	} {
+		a, target, summary, err := validateAction(protocol.ActionExecuteParams{Action: "pr:comment", IdempotencyKey: "key", Params: json.RawMessage(tc.params)})
+		if (err == nil) != tc.valid || tc.valid && (target != "north/demo#5" || a.Repo != "north/demo" || a.Number != 5 || !strings.Contains(summary, "收到")) {
+			t.Errorf("评论参数 %s 得到目标 %q, err=%v", tc.params, target, err)
 		}
 	}
 }

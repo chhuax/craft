@@ -53,6 +53,7 @@ type Daemon struct {
 	alarms             *alarm.Service
 	queue              *alarmQueue
 	outbound           *outbound.Service
+	replies            replyHandler
 
 	mu      sync.Mutex
 	started bool
@@ -155,6 +156,9 @@ func (d *Daemon) start(ctx, run context.Context) error {
 			d.cfg.Logger.Warn("部分外发结果无法核实", "error", err)
 		}
 	}
+	// 握手完成后才能读 hosts；前一代的 executing 也须先核实，避免把本代发送误判为中断。
+	d.replies.ready.Store(true)
+	d.runtime.effects.Kick()
 	if err := d.startAlarms(ctx, extensions); err != nil {
 		return err
 	}
@@ -184,7 +188,9 @@ func (d *Daemon) startRuntime(ctx context.Context, extensions []exthost.Extensio
 
 // 恢复、启动调度、再开始 Pass。测试可在同一入口接入离线驱动。
 func (d *Daemon) startEffects(ctx context.Context, scope engine.SourceScope, settings engine.Settings, catalog []engine.EventDef) error {
-	effects, err := NewEffectScheduler(d.db, d.cfg.Clock, 2*time.Second, 5*time.Minute, d.health.effect, assessmentHandler{d.runtime, scope}, executorHandler{d.executor, "launch"}, executorHandler{d.executor, "delivery"}, executorHandler{d.executor, "stop"})
+	effects, err := NewEffectScheduler(d.db, d.cfg.Clock, 2*time.Second, 5*time.Minute, d.health.effect,
+		assessmentHandler{d.runtime, scope}, executorHandler{d.executor, "launch"},
+		executorHandler{d.executor, "delivery"}, executorHandler{d.executor, "stop"}, &d.replies)
 	if err != nil {
 		return err
 	}
@@ -194,10 +200,7 @@ func (d *Daemon) startEffects(ctx context.Context, scope engine.SourceScope, set
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := d.runtime.start(context.WithoutCancel(ctx), settings, catalog, func() error { return d.executor.sample(ctx, true) }); err != nil {
-		return err
-	}
-	return d.observeEffects(ctx)
+	return d.runtime.start(context.WithoutCancel(ctx), settings, catalog, func() error { return d.executor.sample(ctx, true) })
 }
 
 func (d *Daemon) compatible(exts []exthost.Extension) []exthost.Extension {
@@ -347,9 +350,6 @@ func (d *Daemon) monitor(ctx context.Context, timer *time.Timer, fingerprint str
 		}
 		if err := d.queue.poll(ctx); err != nil && ctx.Err() == nil {
 			d.cfg.Logger.Error("消费闹钟请求失败", "error", err)
-		}
-		if err := d.observeEffects(ctx); err != nil && ctx.Err() == nil {
-			d.cfg.Logger.Error("读取未启用的 effect 队列失败", "error", err)
 		}
 	}
 }

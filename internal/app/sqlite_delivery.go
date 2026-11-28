@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/chhuax/craft/internal/engine"
+	"github.com/chhuax/craft/internal/outbound"
 	"github.com/chhuax/craft/internal/store"
 )
 
@@ -19,13 +20,33 @@ func (r engineReader) HasEffect(kind, key string) (bool, error) {
 func (r engineReader) GetReplyStatus(id string) (engine.ReplyStatus, error) {
 	var status engine.ReplyStatus
 	err := r.get("watch_reply_status", id, &status)
-	return status, err
+	if err != nil || status != engine.ReplyConfirm && status != engine.ReplyUnknown && status != engine.ReplyDropped {
+		return status, err
+	}
+	// 交给 outbox 后，人工确认、撤回和跨进程核实都以同一读快照里的最新回执为准。
+	var record struct {
+		State outbound.State `json:"state"`
+	}
+	if err := r.get("outbox", id, &record); err != nil {
+		return "", err
+	}
+	switch record.State {
+	case outbound.Done:
+		return engine.ReplySent, nil
+	case outbound.Executing, outbound.Unknown:
+		return engine.ReplyUnknown, nil
+	case outbound.Withdrawn:
+		return engine.ReplyDropped, nil
+	case outbound.Failed:
+		return engine.ReplyFailed, nil
+	}
+	return status, nil
 }
 
 // PutReplyStatus 在入队的同一事务内登记状态，空串仅用于表示缺失。
 func (u *engineUnit) PutReplyStatus(id string, status engine.ReplyStatus) error {
 	switch status {
-	case engine.ReplyPending, engine.ReplyConfirm, engine.ReplySent, engine.ReplyDropped:
+	case engine.ReplyPending, engine.ReplyConfirm, engine.ReplySent, engine.ReplyDropped, engine.ReplyFailed, engine.ReplyUnknown:
 		return u.put("watch_reply_status", id, status)
 	default:
 		return fmt.Errorf("回复 %q 的状态无效 %q", id, status)

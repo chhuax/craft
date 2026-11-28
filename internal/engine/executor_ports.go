@@ -59,4 +59,6 @@ const (
 	ReplySent    ReplyStatus = "sent"
 	ReplyDropped ReplyStatus = "dropped"
 	ReplyConfirm ReplyStatus = "confirm"
+	ReplyFailed  ReplyStatus = "failed"
+	ReplyUnknown ReplyStatus = "unknown"
 )

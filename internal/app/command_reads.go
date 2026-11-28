@@ -82,7 +82,15 @@ func (r CommandReader) Attention() ([]engine.AttentionItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mergeAttention(engine.Attention(set), outbound.PendingConfirmations(rows)), nil
+	items := engine.Attention(set)
+	failures, err := r.replyFailures()
+	if err != nil {
+		return nil, err
+	}
+	if len(failures) == 0 && len(rows) == 0 {
+		return items, nil
+	}
+	return mergeAttention(append(items, failures...), outbound.PendingConfirmations(rows)), nil
 }
 
 // SessionAttention 只在已有快照上取开场摘要，区分未初始化与确有零项待办。
@@ -98,9 +106,6 @@ func (r CommandReader) SessionAttention() (int, []engine.AttentionItem, error) {
 }
 
 func mergeAttention(items []engine.AttentionItem, pending []outbound.Confirmation) []engine.AttentionItem {
-	if len(pending) == 0 {
-		return items
-	}
 	items = slices.Grow(items, len(pending))
 	for _, p := range pending {
 		items = append(items, engine.AttentionItem{ID: engine.Key("attention", "confirm", p.ID), Kind: "confirm", Severity: "action",
@@ -209,4 +214,21 @@ func (r CommandReader) WorkFacts(b SessionBinding, id string, offset, limit int)
 		}
 	}
 	return w, triggers, total, nil
+}
+
+func (r CommandReader) replyFailures() ([]engine.AttentionItem, error) {
+	rows, err := r.lookup("replyFailures")
+	if err != nil {
+		return nil, err
+	}
+	items := make([]engine.AttentionItem, len(rows))
+	for i, row := range rows {
+		item := &items[i]
+		if err := json.Unmarshal(row.Value, item); err != nil {
+			return nil, fmt.Errorf("解码回复 %q 的失败记录: %w", row.Key, err)
+		}
+		item.ID = engine.Key("attention", "health", "reply", row.Key)
+		item.Kind, item.Severity, item.Title = "health", "warning", "回复发送失败"
+	}
+	return items, nil
 }

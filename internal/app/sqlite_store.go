@@ -71,7 +71,14 @@ func (u *engineUnit) Emit(e engine.Event) error {
 		if err != nil {
 			return fmt.Errorf("编码事件 %q: %w", e.Type, err)
 		}
-		if err := t.Put("watch_event", strconv.FormatInt(rev, 10), raw); err != nil {
+		key := strconv.FormatInt(rev, 10)
+		if e.Type == "reply.failed" {
+			// 失败消息可能没有 outbox 行。按消息保留原文，使动态流清理后仍可核对这次外发。
+			if err := t.Put("watch_kv", "reply.failed."+e.Ref["message"], raw); err != nil {
+				return err
+			}
+		}
+		if err := t.Put("watch_event", key, raw); err != nil {
 			return err
 		}
 		s := u.store

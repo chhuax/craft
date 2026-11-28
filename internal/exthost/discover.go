@@ -30,8 +30,12 @@ func Discover(dirs ...string) Result {
 	ids := map[string][]string{}
 	sources := map[string][]string{}
 	actions := map[string][]string{}
+	channels := map[string][]string{}
 	for _, e := range all {
 		ids[e.Manifest.ID] = append(ids[e.Manifest.ID], e.ManifestPath)
+		for id := range e.Manifest.Channels {
+			channels[id] = append(channels[id], e.ManifestPath)
+		}
 		for _, a := range e.Manifest.Actions {
 			actions[a.ID] = append(actions[a.ID], e.ManifestPath)
 		}
@@ -61,6 +65,7 @@ func Discover(dirs ...string) Result {
 			}
 		}
 	}
+	r.rejectConflicts("ports.channels", channels)
 	r.rejectConflicts("actions.id", actions)
 	r.rejectConflicts("watch_sources.events", events)
 	r.rejectConflicts("watch_sources.id", sources)
