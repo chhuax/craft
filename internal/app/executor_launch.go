@@ -52,6 +52,11 @@ func (x *executor) launchFailed(ctx context.Context, p assignmentRef, summary st
 	return err
 }
 
+func existingDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func (x *executor) dispatchAssignment(ctx context.Context, w *engine.Work, p assignmentRef) error {
 	s := sessionOf(w)
 	name := x.name
@@ -63,8 +68,9 @@ func (x *executor) dispatchAssignment(ctx context.Context, w *engine.Work, p ass
 		return fmt.Errorf("%w: 宿主 %q 不可用", errTransient, name)
 	}
 	dir := w.Execution.Directory
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		target, err := (preparer{d}).Prepare(ctx, *w.Execution.Target, *w)
+	// scratch 的边界由状态目录和 Work ID 决定，重放时也须核对，不能信任缓存路径。
+	if w.Execution.Target.Kind == "scratch" || !existingDirectory(dir) {
+		target, err := (preparer{driver: d, stateDir: x.stateDir}).Prepare(ctx, *w.Execution.Target, *w)
 		if err != nil {
 			if errors.Is(err, errTransient) {
 				return err
@@ -72,6 +78,9 @@ func (x *executor) dispatchAssignment(ctx context.Context, w *engine.Work, p ass
 			return &launchFailure{fmt.Errorf("准备派工目录: %w", err)}
 		}
 		dir = target.Directory
+		if s.ID != "" && dir != w.Execution.Directory && w.Execution.Target.Kind == "scratch" {
+			return &launchFailure{errors.New("已登记会话的目录与 scratch 目录不符")}
+		}
 	}
 	if err := x.register(ctx, p, dir, w.Execution.Session, confirmed(w)); err != nil {
 		return err
@@ -111,7 +120,7 @@ func (x *executor) dispatchAssignment(ctx context.Context, w *engine.Work, p ass
 	key := "launch." + p.AssignmentID
 	if s.ID == "" {
 		var sent bool
-		s, sent, err = x.create(ctx, d, p, dir, w.Execution.Target.Path, title, body, id, key)
+		s, sent, err = x.create(ctx, d, p, dir, w.Execution.Target, title, body, id, key)
 		if err != nil {
 			return err
 		}
@@ -149,9 +158,17 @@ func (x *executor) register(ctx context.Context, p assignmentRef, dir string, s 
 	}
 	return nil
 }
-func (x *executor) create(ctx context.Context, d host.Driver, p assignmentRef, dir, target, title, body, id, key string) (host.Session, bool, error) {
+
+func workerPermissions(target *engine.TargetSnapshot) host.Permissions {
+	if target != nil && target.Kind == "scratch" {
+		return host.Permissions{WriteScope: host.Workspace}
+	}
+	return host.Permissions{}
+}
+
+func (x *executor) create(ctx context.Context, d host.Driver, p assignmentRef, dir string, target *engine.TargetSnapshot, title, body, id, key string) (host.Session, bool, error) {
 	separate := d.Capabilities().CreateSeparatesPrompt
-	spec := host.CreateSpec{Directory: dir, Title: title, Env: map[string]string{host.EnvWork: p.WorkID, host.EnvAssignment: p.AssignmentID}}
+	spec := host.CreateSpec{Directory: dir, Title: title, Permissions: workerPermissions(target), Env: map[string]string{host.EnvWork: p.WorkID, host.EnvAssignment: p.AssignmentID}}
 	if !separate {
 		spec.Prompt, spec.DeliveryID = body, id
 		if _, err := x.startAt(ctx, key); err != nil {
@@ -179,7 +196,7 @@ func (x *executor) create(ctx context.Context, d host.Driver, p assignmentRef, d
 		s, err := d.Create(ctx, spec)
 		if registered.ID == "" && s.ID != "" {
 			// 创建已发生但回调被拒，停止必须指向新拿到的会话，不能再查 Work。
-			if stopErr := x.orphanStop(ctx, p, s, dir, target); stopErr != nil {
+			if stopErr := x.orphanStop(ctx, p, s, dir, target.Path); stopErr != nil {
 				return s, false, stopErr
 			}
 			if registrationErr != nil {

@@ -1,7 +1,10 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/chhuax/craft/internal/engine"
@@ -10,16 +13,34 @@ import (
 )
 
 func BenchmarkExecutorLaunch(b *testing.B) {
-	x, _, row := workerFixture(b, true)
-	ctx := b.Context()
-	pending, err := x.work(ctx, "work")
-	checkErr(b, err)
-	b.ReportAllocs()
-	for b.Loop() {
-		b.StopTimer()
-		checkErr(b, x.r.repo.Atomic(ctx, func(u engine.Unit) error { return u.PutWork(*pending) }))
-		b.StartTimer()
-		checkErr(b, x.run(ctx, row).Err)
+	for _, kind := range []string{"dir", "scratch"} {
+		b.Run(kind, func(b *testing.B) {
+			x, _, row := workerFixture(b, true)
+			ctx := b.Context()
+			pending, err := x.work(ctx, "work")
+			checkErr(b, err)
+			if kind == "scratch" {
+				pending.Execution.Target = &engine.TargetSnapshot{ID: kind, Kind: kind}
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				if kind == "scratch" {
+					// 每次都计入新建 Work 目录的成本，父目录由各次派工共享。
+					if err := os.Remove(filepath.Join(x.stateDir, "scratch", pending.ID)); !errors.Is(err, os.ErrNotExist) {
+						checkErr(b, err)
+					}
+				}
+				checkErr(b, x.r.repo.Atomic(ctx, func(u engine.Unit) error { return u.PutWork(*pending) }))
+				b.StartTimer()
+				checkErr(b, x.run(ctx, row).Err)
+			}
+			w, err := x.work(ctx, pending.ID)
+			checkErr(b, err)
+			if latest(w).State != engine.AssignmentRunning {
+				b.Fatal("基准派工没有启动", latest(w))
+			}
+		})
 	}
 }
 func BenchmarkExecutorDeliveryBatch(b *testing.B) {

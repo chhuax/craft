@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -15,7 +16,10 @@ import (
 	"github.com/chhuax/craft/internal/host"
 )
 
-type preparer struct{ driver host.Driver }
+type preparer struct {
+	driver   host.Driver
+	stateDir string
+}
 
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
@@ -89,9 +93,54 @@ func excludeWorktree(common, entry string) (err error) {
 	return err
 }
 
-// Prepare 只复用同仓库的有效副本。即使创建失败，也只回收本次留下的空目录。
+// scratch 可能已被执行方写入内容，只核对目录本身，保留其中的文件。
+func privateDir(root *os.Root, name string) (err error) {
+	if err := root.Mkdir(name, 0700); !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	info, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("路径 %q 已被占用，需要独立目录", name)
+	}
+	if runtime.GOOS == "windows" || info.Mode().Perm() == 0700 {
+		return nil
+	}
+	// 对已打开的目录改权限，避免检查后路径被替换而改到其他文件。
+	dir, err := root.OpenRoot(name)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, dir.Close()) }()
+	return dir.Chmod(".", 0700)
+}
+
+func (p preparer) scratch(workID string) (target engine.PreparedTarget, err error) {
+	if !filepath.IsLocal(workID) || workID == "." || strings.ContainsAny(workID, `/\`) {
+		return target, fmt.Errorf("无效的 scratch 目录名 %q", workID)
+	}
+	root, err := os.OpenRoot(p.stateDir)
+	if err != nil {
+		return target, fmt.Errorf("打开状态目录: %w", err)
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	rel := filepath.Join("scratch", workID)
+	for _, name := range []string{"scratch", rel} {
+		if err := privateDir(root, name); err != nil {
+			return target, fmt.Errorf("准备目录 %q: %w", name, err)
+		}
+	}
+	return engine.PreparedTarget{Directory: filepath.Join(p.stateDir, rel)}, nil
+}
+
+// Prepare 按目标种类准备执行目录；git 目标须先经宿主规划副本路径。
 func (p preparer) Prepare(ctx context.Context, t engine.TargetSnapshot, w engine.Work) (engine.PreparedTarget, error) {
 	var empty engine.PreparedTarget
+	if t.Kind == "scratch" {
+		return p.scratch(w.ID)
+	}
 	if !filepath.IsAbs(t.Path) {
 		return empty, errors.New("目标路径必须为绝对路径")
 	}

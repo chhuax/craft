@@ -20,7 +20,7 @@ import (
 )
 
 func (d *Daemon) setupExecutor() error {
-	x := newExecutor(d.runtime, "", map[string]host.Driver{}, d.health)
+	x := newExecutor(d.runtime, d.cfg.StateDir, "", map[string]host.Driver{}, d.health)
 	d.executor = x
 	var config struct {
 		Host  string `json:"host"`
@@ -91,7 +91,7 @@ func (x *executor) lookupSession(ctx context.Context, s host.Session) (spec host
 		if a.State == engine.AssignmentEnded || !legacy && w.Execution.Assignment != a.ID {
 			return errStale
 		}
-		spec = host.CreateSpec{Directory: w.Execution.Directory, Env: map[string]string{host.EnvWork: w.ID, host.EnvAssignment: a.ID}}
+		spec = host.CreateSpec{Directory: w.Execution.Directory, Permissions: workerPermissions(w.Execution.Target), Env: map[string]string{host.EnvWork: w.ID, host.EnvAssignment: a.ID}}
 		return nil
 	})
 	return

@@ -16,6 +16,7 @@ import (
 
 type executor struct {
 	r               *Runtime
+	stateDir        string
 	name            string
 	drivers         map[string]host.Driver
 	health          *daemonHealth
@@ -28,9 +29,9 @@ type executor struct {
 	titles          map[host.Session]titleSource
 }
 
-func newExecutor(r *Runtime, name string, drivers map[string]host.Driver, h *daemonHealth) *executor {
+func newExecutor(r *Runtime, stateDir, name string, drivers map[string]host.Driver, h *daemonHealth) *executor {
 	return &executor{
-		r: r, name: name, drivers: drivers, health: h,
+		r: r, stateDir: stateDir, name: name, drivers: drivers, health: h,
 		maxWorkers: 3, window: 5 * time.Minute, maxWait: 15 * time.Minute,
 		reserved: map[string]bool{}, states: map[host.Session]sampleState{}, titles: map[host.Session]titleSource{},
 	}
