@@ -77,6 +77,7 @@ internal/store/           SQLite 仓储与 schema（SQL 只在这里）
 internal/alarm/           闹钟服务（可注入时钟）
 internal/app/             运行层：inbox、effects、passes、source context
 internal/exthost/         扩展进程管理与 JSON-RPC
+internal/host/            宿主会话驱动（claude-code、codex）：创建、追加、停止、状态；进程外调用宿主的命令行
 internal/outbound/        分级确认与对外写
 internal/cli/             子命令
 internal/method/          方法层（只用标准库，不导入 Watch 内核任何包，见 08-method.md K1）
@@ -86,7 +87,7 @@ hosts/                    各宿主的薄包（skill markdown + 调用说明）
 docs/
 ```
 
-依赖方向只能自上而下：`cli → app → engine`；`app → store / alarm / exthost / outbound`。`internal/engine` 禁止导入除标准库以外的任何包，由 CI 守门测试检查。
+依赖方向只能自上而下：`cli → app → engine`；`app → store / alarm / exthost / outbound / host`；`host → exthost`（只复用其 JSON-RPC 连接）。`internal/engine` 禁止导入除标准库以外的任何包，由 CI 守门测试检查。
 
 ## 6. 范围外（v1 不做）
 
