@@ -102,10 +102,23 @@ func createV1(tx *sql.Tx) error {
 		`CREATE TABLE watch_effect (
 			kind TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL CHECK(json_valid(value)),
 			seq INTEGER NOT NULL, generation INTEGER NOT NULL, attempts INTEGER NOT NULL,
-			error TEXT, due TEXT NOT NULL, since TEXT NOT NULL, PRIMARY KEY (kind, key)
+			error TEXT, due TEXT NOT NULL, since TEXT NOT NULL, failure_order INTEGER, PRIMARY KEY (kind, key)
 		)`,
 		"CREATE INDEX effect_order ON watch_effect(kind,seq)",
 		"CREATE INDEX effect_due ON watch_effect(kind,due,seq)",
+		"CREATE INDEX effect_since ON watch_effect(kind,since)",
+		"CREATE INDEX effect_attempts ON watch_effect(kind,attempts) WHERE attempts>0",
+		"CREATE INDEX effect_failure ON watch_effect(kind,failure_order) WHERE failure_order IS NOT NULL",
+		// SQLite 的按类计数需要遍历该类所有索引项。把行数与队列一起提交，使调度成本与积压深度无关。
+		"CREATE TABLE effect_count (kind TEXT PRIMARY KEY, waiting INTEGER NOT NULL) WITHOUT ROWID",
+		`CREATE TRIGGER effect_insert AFTER INSERT ON watch_effect BEGIN
+			INSERT INTO effect_count VALUES(NEW.kind,1)
+			ON CONFLICT(kind) DO UPDATE SET waiting=waiting+1;
+		END`,
+		`CREATE TRIGGER effect_delete AFTER DELETE ON watch_effect BEGIN
+			UPDATE effect_count SET waiting=waiting-1 WHERE kind=OLD.kind;
+			DELETE FROM effect_count WHERE kind=OLD.kind AND waiting=0;
+		END`,
 		"CREATE TABLE alarm_state (" + documentColumns + ")",
 		"CREATE TABLE ext_state (" + documentColumns + ")",
 	} {

@@ -183,3 +183,84 @@ func TestEnqueueUsesInjectedClock(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestEffectStatsAndNextDue(t *testing.T) {
+	ctx := t.Context()
+	db := openTestDB(t, filepath.Join(t.TempDir(), "stats.db"))
+	first := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	db.now = func() time.Time { return first }
+	write := func(fn func(*SQLiteTx) error) { t.Helper(); requireStoreOK(t, db.Write(ctx, fn)) }
+	enqueue := func(key string) {
+		t.Helper()
+		write(func(tx *SQLiteTx) error { return tx.Enqueue("delivery", key, json.RawMessage("1")) })
+	}
+	enqueue("a")
+	a := head(t, db)
+	next := first.Add(time.Hour)
+	db.now = func() time.Time { return next }
+	enqueue("b")
+	var b Effect
+	requireStoreOK(t, db.View(ctx, func(r SQLiteReader) error {
+		rows, err := r.DueEffects("delivery", next, 2)
+		if err != nil {
+			return err
+		}
+		if len(rows) != 2 {
+			t.Fatalf("到期行 %v", rows)
+		}
+		b = rows[1]
+		due, err := r.NextEffectDue("delivery", first)
+		if !due.Equal(next) {
+			t.Errorf("下一到期时间 %v", due)
+		}
+		return err
+	}))
+	check := func(want EffectStats) {
+		t.Helper()
+		requireStoreOK(t, db.View(ctx, func(r SQLiteReader) error {
+			got, err := r.EffectStats("delivery")
+			if got != want {
+				t.Errorf("统计 %+v，期望 %+v", got, want)
+			}
+			due, err2 := r.NextEffectDue("delivery", next.Add(time.Hour))
+			if !due.IsZero() {
+				t.Errorf("意外到期时间 %v", due)
+			}
+			return errors.Join(err, err2)
+		}))
+	}
+	// 最近失败可以来自较老的行，也可能与前一次失败处于同一毫秒。
+	write(func(tx *SQLiteTx) error {
+		for range 3 {
+			if err := tx.FailEffect(b, next, time.Second, time.Minute, "b"); err != nil {
+				return err
+			}
+		}
+		return tx.FailEffect(a, next, time.Second, time.Minute, "a")
+	})
+	check(EffectStats{Waiting: 2, Oldest: a.Since, MaxAttempts: 3, LastError: "a"})
+	enqueue("a")
+	check(EffectStats{Waiting: 2, Oldest: a.Since, MaxAttempts: 3, LastError: "b"})
+	a = head(t, db)
+	abort := errors.New("撤销")
+	if err := db.Write(ctx, func(tx *SQLiteTx) error {
+		if err := tx.DeleteEffect(a); err != nil {
+			return err
+		}
+		return abort
+	}); !errors.Is(err, abort) {
+		t.Fatal(err)
+	}
+	check(EffectStats{Waiting: 2, Oldest: a.Since, MaxAttempts: 3, LastError: "b"})
+	write(func(tx *SQLiteTx) error { return tx.DeleteEffect(a) })
+	check(EffectStats{Waiting: 1, Oldest: b.Since, MaxAttempts: 3, LastError: "b"})
+	write(func(tx *SQLiteTx) error { return tx.DeleteEffect(b) })
+	check(EffectStats{})
+}
+
+func TestEffectSchedulingPlans(t *testing.T) {
+	db := openTestDB(t, filepath.Join(t.TempDir(), "plans.db"))
+	checkPlan(t, db, effectDue, "INDEX effect_due (kind=? AND due<?)")
+	checkPlan(t, db, effectNextDue, "INDEX effect_due (kind=? AND due>?)")
+	checkPlan(t, db, effectStatsQuery, "PRIMARY KEY (kind=?)", "INDEX effect_since", "INDEX effect_attempts", "INDEX effect_failure")
+}

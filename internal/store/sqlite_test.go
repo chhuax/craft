@@ -108,7 +108,8 @@ func TestSchemaV1(t *testing.T) {
 		"watch_trigger_thread": {"key", "value", "trigger_id", "thread_key"},
 		"watch_decision":       {"key", "value", "thread_key"},
 		"watch_inbox":          {"id", "value", "at", "seq"},
-		"watch_effect":         {"kind", "key", "value", "seq", "generation", "attempts", "error", "due", "since"},
+		"watch_effect":         {"kind", "key", "value", "seq", "generation", "attempts", "error", "due", "since", "failure_order"},
+		"effect_count":         {"kind", "waiting"},
 		"alarm_state":          {"key", "value"},
 		"ext_state":            {"key", "value"},
 	} {

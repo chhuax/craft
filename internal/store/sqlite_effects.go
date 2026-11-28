@@ -38,7 +38,7 @@ func (t *SQLiteTx) Enqueue(kind, key string, value json.RawMessage) error {
 	const query = `INSERT INTO watch_effect(kind,key,value,seq,generation,attempts,due,since)
 		VALUES (?,?,?,?,1,0,?,?)
 		ON CONFLICT(kind,key) DO UPDATE SET value=excluded.value,generation=generation+1,
-		attempts=0,error=NULL,due=excluded.due`
+		attempts=0,error=NULL,failure_order=NULL,due=excluded.due`
 	// SQLite 对 JSON 深度还有额外限制。即使调用方捕获入队错误也不能只提交计数器。
 	return t.Savepoint(t.ctx, func(child *SQLiteTx) error {
 		seq, err := child.NextCounter("effect.seq")
@@ -127,7 +127,10 @@ func (t *SQLiteTx) LaterEffect(e Effect, now time.Time, base time.Duration) erro
 // FailEffect 按写回前的失败次数计算退避，到达 ceiling 后不再增长。
 func (t *SQLiteTx) FailEffect(e Effect, now time.Time, base, ceiling time.Duration, message string) error {
 	// 以毫秒计算，duration 的毫秒数乘以 2^16 仍在 int64 范围内。
+	// 失败顺序仅用于比较尚在队中的错误，同毫秒写回也能分出先后。与 seq 的身份守卫无关。
 	const query = `UPDATE watch_effect SET attempts=attempts+1,error=?,
+		failure_order=1+coalesce((SELECT failure_order FROM watch_effect WHERE kind=? AND failure_order IS NOT NULL
+			ORDER BY failure_order DESC LIMIT 1),0),
 		due=strftime('%Y-%m-%dT%H:%M:%fZ',?,printf('%+.3f seconds',min(?,?*(1<<min(attempts,16)))/1000.0))`
 	n := 0
 	for i := range message {
@@ -137,7 +140,7 @@ func (t *SQLiteTx) FailEffect(e Effect, now time.Time, base, ceiling time.Durati
 		}
 		n++
 	}
-	return t.finishEffect(e, query, message, now.UTC().Format(milliseconds), ceiling.Milliseconds(), base.Milliseconds())
+	return t.finishEffect(e, query, message, e.Kind, now.UTC().Format(milliseconds), ceiling.Milliseconds(), base.Milliseconds())
 }
 
 func (t *SQLiteTx) finishEffect(e Effect, query string, args ...any) error {
