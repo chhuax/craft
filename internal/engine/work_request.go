@@ -184,7 +184,7 @@ func (e *Engine) Dismiss(ctx context.Context, id string) (Decision, error) {
 		if err := u.PutDecision(*d); err != nil {
 			return err
 		}
-		return emitAssessment(u, "decision.dismissed", e.cfg.Clock(), map[string]string{"decision": id, "thread": d.ThreadKey}, map[string]any{"decisionId": id, "threadKey": d.ThreadKey})
+		return emitEvent(u, "decision.dismissed", e.cfg.Clock(), map[string]string{"decision": id, "thread": d.ThreadKey}, map[string]any{"decisionId": id, "threadKey": d.ThreadKey})
 	})
 	if err != nil {
 		return Decision{}, fmt.Errorf("消除研判待办 %q: %w", id, err)

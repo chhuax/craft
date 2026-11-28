@@ -278,3 +278,30 @@ func requestUnsubscribedOrigin(t *testing.T, s engine.Store) {
 		t.Fatal("退订后重复受理相同起源")
 	}
 }
+
+// 数据出现「运行中却没有登记会话」的不一致时，人必须仍能停止这个 Work：
+// 没有会话就没有要停的东西，不能因此报错把人挡住。
+func stopWithoutSession(t *testing.T, s engine.Store) {
+	ctx := t.Context()
+	p := evalPolicy(t, engine.Settings{})
+	ref := item("nosession")
+	key := engine.ThreadKey(ref)
+	w := engine.Work{ID: "w", Assignments: []engine.Assignment{{ID: "a", State: engine.AssignmentRunning}}}
+	must(t, s.Atomic(ctx, func(u engine.Unit) error {
+		must(t, u.PutWork(w))
+		return u.PutThread(engine.Thread{Key: key, Ref: ref, Subscriptions: []string{"w"}})
+	}))
+	var stops int
+	store := &queueStore{Store: s, check: func(kind, _ string, _ json.RawMessage) error {
+		if kind == "stop" {
+			stops++
+		}
+		return nil
+	}}
+	e := evalEngine(t, store, &p)
+	stopped, err := e.StopWork(ctx, w.ID, "终止")
+	must(t, err)
+	if stopped.Ended == nil || stopped.Ended.By != "human" || stops != 0 {
+		t.Fatalf("没有会话时的停止 %+v，stop 入队 %d 次", stopped.Ended, stops)
+	}
+}

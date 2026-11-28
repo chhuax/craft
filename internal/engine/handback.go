@@ -142,7 +142,7 @@ func returnEvent(u Unit, w *Work, tr *Trigger, th *Thread, d *TriggerDisposition
 	if err := u.PutDisposition(tr.ID, *d); err != nil {
 		return false, err
 	}
-	return queued, emitAssessment(u, "trigger.handback", now, map[string]string{"work": w.ID, "trigger": tr.ID, "thread": th.Key}, map[string]any{"workId": w.ID, "triggerId": tr.ID, "reason": reason})
+	return queued, emitEvent(u, "trigger.handback", now, map[string]string{"work": w.ID, "trigger": tr.ID, "thread": th.Key}, map[string]any{"workId": w.ID, "triggerId": tr.ID, "reason": reason})
 }
 
 func retractAutoFollow(u Unit, w *Work, tr *Trigger, th *Thread, sourceRefs map[ThreadRef]bool, reason, now string) (bool, error) {

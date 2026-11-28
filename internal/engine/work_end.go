@@ -49,7 +49,7 @@ func endWork(u Unit, w *Work, end WorkEnd, threads map[string]*Thread, now strin
 	if end.Reason != "" {
 		data["reason"] = end.Reason
 	}
-	if err := emitAssessment(u, "work.ended", now, map[string]string{"work": w.ID}, data); err != nil {
+	if err := emitEvent(u, "work.ended", now, map[string]string{"work": w.ID}, data); err != nil {
 		return err
 	}
 	for _, id := range running {
@@ -95,11 +95,13 @@ func unsubscribeEnded(u Unit, w *Work, threads map[string]*Thread, by, reason, n
 }
 
 func enqueueStop(u Unit, w *Work, id string) error {
-	// 即使下一次派工改变了执行位置，停止请求也必须指向旧会话的快照。
+	// 没有登记会话就没有可停的东西。这里不能报错：数据一旦出现「运行中却没有会话」的不一致，
+	// 报错会让人永远停不掉这个 Work，比漏发一次停止请求糟糕得多。
 	if w.Execution == nil || w.Execution.Session == nil || w.Execution.Session.ID == "" || w.Execution.Session.Host == "" {
-		return fmt.Errorf("停止 Work %q 的运行派工 %q 时缺少会话", w.ID, id)
+		return nil
 	}
-	return enqueueAssessment(u, "stop", id, map[string]any{"workId": w.ID, "assignmentId": id, "session": w.Execution.Session})
+	// 即使下一次派工改变了执行位置，停止请求也必须指向旧会话的快照。
+	return enqueueEffect(u, "stop", id, map[string]any{"workId": w.ID, "assignmentId": id, "session": w.Execution.Session})
 }
 
 // RetryWork 重试投递故障或替换受阻、失败的派工；后者在新 launch 前登记旧轮的 stop。
@@ -120,7 +122,7 @@ func (e *Engine) RetryWork(ctx context.Context, workID string) (Work, error) {
 		old.State = AssignmentEnded
 		old.EndedAt = now
 		old.EndedReason = "retried"
-		if err := emitAssessment(u, "assignment.ended", now, map[string]string{"work": w.ID, "assignment": old.ID}, map[string]any{"workId": w.ID, "assignmentId": old.ID, "reason": "retried"}); err != nil {
+		if err := emitEvent(u, "assignment.ended", now, map[string]string{"work": w.ID, "assignment": old.ID}, map[string]any{"workId": w.ID, "assignmentId": old.ID, "reason": "retried"}); err != nil {
 			return err
 		}
 		if stop {
@@ -149,7 +151,7 @@ func retryDelivery(u Unit, w *Work, old *Assignment, now string) error {
 		return err
 	}
 	if old.State == AssignmentRunning {
-		return enqueueAssessment(u, "delivery", w.ID, map[string]string{"workId": w.ID})
+		return enqueueEffect(u, "delivery", w.ID, map[string]string{"workId": w.ID})
 	}
 	return enqueueLaunch(u, w.ID, old.ID)
 }
@@ -166,5 +168,5 @@ func requeueUnread(w *Work, id string) {
 }
 
 func enqueueLaunch(u Unit, workID, assignmentID string) error {
-	return enqueueAssessment(u, "launch", assignmentID, map[string]string{"assignmentId": assignmentID, "workId": workID})
+	return enqueueEffect(u, "launch", assignmentID, map[string]string{"assignmentId": assignmentID, "workId": workID})
 }

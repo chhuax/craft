@@ -80,6 +80,9 @@ func reboundClose(t *testing.T, s engine.Store) {
 	}
 }
 
+// 正常 launch 先登记会话才标记 running；若数据里出现「运行中却没有会话」的损坏记录，
+// 关闭联动不能因此整条失败——否则这个对象的关闭事实记不下来，订阅它的其他 Work 也会被连累，
+// 扩展还会不停重试。没有会话就没有可停的东西：照常结束 Work，只是不入队 stop。
 func closeWithoutSession(t *testing.T, s engine.Store) {
 	ctx := t.Context()
 	cfg := config(s)
@@ -90,12 +93,9 @@ func closeWithoutSession(t *testing.T, s engine.Store) {
 		must(t, u.PutThread(engine.Thread{Key: key, Ref: r, Subscriptions: []string{"running"}}))
 		return u.PutWork(engine.Work{ID: "running", Follows: []engine.Follow{{Thread: key, Own: true}}, Assignments: []engine.Assignment{{ID: "run", State: engine.AssignmentRunning}}})
 	}))
-	// 正常 launch 先登记会话才标记 running。损坏的记录不能提交一个无法定位会话的 stop。
-	if err := e.ThreadClosed(ctx, r, "done", now, ""); err == nil {
-		t.Fatal("缺失会话仍提交了停止请求")
-	}
-	if getThread(t, s, r).Closed != nil || readWork(t, s, "running").Ended != nil {
-		t.Fatal("关闭联动的对象写入未回滚")
+	must(t, e.ThreadClosed(ctx, r, "done", now, ""))
+	if getThread(t, s, r).Closed == nil || readWork(t, s, "running").Ended == nil {
+		t.Fatal("会话缺失的损坏记录挡住了对象关闭与 Work 结束")
 	}
 }
 

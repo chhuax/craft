@@ -131,7 +131,7 @@ func subscribeWork(u Unit, th *Thread, id, now string) error {
 	if existing {
 		return nil
 	}
-	return emitAssessment(u, "thread.subscribed", now, map[string]string{"thread": th.Key, "work": id}, map[string]any{"threadKey": th.Key, "workId": id})
+	return emitEvent(u, "thread.subscribed", now, map[string]string{"thread": th.Key, "work": id}, map[string]any{"threadKey": th.Key, "workId": id})
 }
 
 func addOwnFollow(w *Work, th *Thread, ids []string) {
@@ -176,7 +176,7 @@ func launchWork(u Unit, w *Work, batch []*Trigger, now string) error {
 	if err := u.PutWork(*w); err != nil {
 		return err
 	}
-	if err := emitAssessment(u, "work.created", now, map[string]string{"work": w.ID, "decision": w.DecisionID, "thread": ThreadKey(batch[0].Threads[0])},
+	if err := emitEvent(u, "work.created", now, map[string]string{"work": w.ID, "decision": w.DecisionID, "thread": ThreadKey(batch[0].Threads[0])},
 		map[string]any{"workId": w.ID, "decisionId": w.DecisionID, "strength": w.Mandate.Strength}); err != nil {
 		return err
 	}

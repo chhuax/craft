@@ -101,7 +101,7 @@ func subscriptionEvent(u Unit, kind, key, id, by, reason, now string) error {
 	if reason != "" {
 		data["reason"] = reason
 	}
-	return emitAssessment(u, kind, now, map[string]string{"thread": key, "work": id}, data)
+	return emitEvent(u, kind, now, map[string]string{"thread": key, "work": id}, data)
 }
 
 func removeSubscription(th *Thread, id string) {

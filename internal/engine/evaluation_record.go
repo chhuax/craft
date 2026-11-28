@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-func emitAssessment(u Unit, kind, now string, ref map[string]string, fields map[string]any) error {
+func emitEvent(u Unit, kind, now string, ref map[string]string, fields map[string]any) error {
 	data := make(map[string]json.RawMessage, len(fields))
 	for name, v := range fields {
 		raw, err := jsonv2.Marshal(v)
@@ -19,10 +19,10 @@ func emitAssessment(u Unit, kind, now string, ref map[string]string, fields map[
 }
 
 func emitTrigger(u Unit, kind, id, key, now string) error {
-	return emitAssessment(u, kind, now, map[string]string{"thread": key, "trigger": id}, map[string]any{"triggerId": id})
+	return emitEvent(u, kind, now, map[string]string{"thread": key, "trigger": id}, map[string]any{"triggerId": id})
 }
 
-func enqueueAssessment(u Unit, kind, key string, data any) error {
+func enqueueEffect(u Unit, kind, key string, data any) error {
 	raw, err := jsonv2.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("编码 %s 请求: %w", kind, err)
@@ -70,7 +70,7 @@ func recordDecision(u Unit, ev *Evaluation, d Decision, disps map[string]*Trigge
 	if d.WorkID != "" {
 		ref["work"] = d.WorkID
 	}
-	err := emitAssessment(u, "decision.recorded", d.At, ref, map[string]any{"decisionId": d.ID, "threadKey": ev.ThreadKey, "kind": d.Kind})
+	err := emitEvent(u, "decision.recorded", d.At, ref, map[string]any{"decisionId": d.ID, "threadKey": ev.ThreadKey, "kind": d.Kind})
 	return d, err
 }
 

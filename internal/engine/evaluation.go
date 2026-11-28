@@ -187,10 +187,10 @@ func gateBatch(u Unit, th *Thread, ids []string, triggers map[string]*Trigger, d
 		return err
 	}
 	ref := map[string]string{"eval": ev.ID, "thread": th.Key, "trigger": ids[0]}
-	if err := emitAssessment(u, "eval.started", now, ref, map[string]any{"evalId": ev.ID, "threadKey": th.Key, "triggerIds": ids, "strength": ev.Strength}); err != nil {
+	if err := emitEvent(u, "eval.started", now, ref, map[string]any{"evalId": ev.ID, "threadKey": th.Key, "triggerIds": ids, "strength": ev.Strength}); err != nil {
 		return err
 	}
-	return enqueueAssessment(u, "assessment", ev.ID, map[string]string{"evalId": ev.ID})
+	return enqueueEffect(u, "assessment", ev.ID, map[string]string{"evalId": ev.ID})
 }
 
 func batchID(key, kind, version, now string, ids []string, disps map[string]*TriggerDisposition) string {
