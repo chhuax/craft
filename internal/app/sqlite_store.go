@@ -13,9 +13,10 @@ import (
 )
 
 type engineStore struct {
-	db   *store.SQLite
-	mu   sync.Mutex
-	subs []func(engine.Event)
+	onEvent func()
+	db      *store.SQLite
+	mu      sync.Mutex
+	subs    []func(engine.Event)
 }
 
 // NewSQLiteStore 将已打开的文件库用作引擎仓储，连接的生命周期仍由调用方管理。
@@ -80,6 +81,9 @@ func (u *engineUnit) Emit(e engine.Event) error {
 }
 
 func (s *engineStore) broadcast(raw []byte) {
+	if s.onEvent != nil {
+		s.onEvent()
+	}
 	s.mu.Lock()
 	subs := s.subs
 	s.mu.Unlock()

@@ -13,11 +13,11 @@ type HealthEntry struct {
 
 // DaemonHealth 是独立的只读快照；被拒绝的 manifest 按路径区分重名扩展。
 type DaemonHealth struct {
-	Extensions map[string]HealthEntry
-	Rejected   map[string]HealthEntry
-	Reports    map[string]map[string]HealthEntry
-	Alarms     map[string]HealthEntry
-	Effects    map[string]HealthState
+	Extensions map[string]HealthEntry            `json:"extensions"`
+	Rejected   map[string]HealthEntry            `json:"rejected"`
+	Reports    map[string]map[string]HealthEntry `json:"reports"`
+	Alarms     map[string]HealthEntry            `json:"alarms"`
+	Effects    map[string]HealthState            `json:"effects"`
 }
 
 type daemonHealth struct {

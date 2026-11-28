@@ -46,15 +46,23 @@ func (req AlarmRequest) save(tx *store.SQLiteTx) error {
 func ReadAlarmRequest(ctx context.Context, db *store.SQLite, id string) (AlarmRequest, error) {
 	var req AlarmRequest
 	err := db.View(ctx, func(r store.SQLiteReader) error {
-		v, ok, err := r.Get("watch_alarm_request", id)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("请求 %q 不存在", id)
-		}
-		return json.Unmarshal(v, &req)
+		var err error
+		req, err = alarmRequest(r, id)
+		return err
 	})
+	return req, err
+}
+
+func alarmRequest(r store.SQLiteReader, id string) (AlarmRequest, error) {
+	var req AlarmRequest
+	v, ok, err := r.Get("watch_alarm_request", id)
+	if err != nil {
+		return req, err
+	}
+	if !ok {
+		return req, fmt.Errorf("请求 %q 不存在", id)
+	}
+	err = json.Unmarshal(v, &req)
 	return req, err
 }
 

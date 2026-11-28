@@ -119,3 +119,8 @@ func (d *Daemon) observeEffects(ctx context.Context) error {
 	}
 	return err
 }
+
+func (d *Daemon) fingerprintChanged(initial string) bool {
+	current := d.fingerprint()
+	return current != "" && current != initial
+}

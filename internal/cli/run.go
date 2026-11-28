@@ -43,6 +43,7 @@ type CommandContext struct {
 }
 
 type invocation struct {
+	stderr        io.Writer
 	extensionDirs []string
 	ctx           context.Context
 	spec          commandSpec
@@ -60,6 +61,16 @@ func commands() []commandSpec {
 	return []commandSpec{
 		{"version", "", "", local, versionResult},
 		{"doctor", "", "", local, doctorResult},
+		{"daemon run", "", "", person, daemonRun},
+		{"daemon start", "", "", person, daemonStart},
+		{"daemon stop", "", "[--force]", person, daemonStop},
+		{"daemon status", "", "", reader, daemonStatus},
+		{"alarm list", "", "", reader, daemonRPC},
+		{"alarm run", "<ext> <alarm>", "[--wait [SEC]]", person, alarmRun},
+		{"ext enable", "<id>", "", settings, daemonRPC},
+		{"ext disable", "<id>", "", settings, daemonRPC},
+		{"ext list", "", "", reader, extList},
+		{"ext logs", "<id>", "[--tail N]", reader, extLogs},
 		{"--help", "", "", local, helpResult},
 		{"watch status", "", "", reader, status},
 		{"watch attention", "", "[--cursor C]", reader, attention},
@@ -160,7 +171,9 @@ func (i *invocation) parse(args []string) error {
 			return invalid("未知或重复的选项 %q", name)
 		}
 		if o.value {
-			if !inline {
+			if !inline && name == "--wait" && (n+1 == len(args) || strings.HasPrefix(args[n+1], "--")) {
+				v = "30"
+			} else if !inline {
 				if n+1 == len(args) || strings.HasPrefix(args[n+1], "--") {
 					return invalid("%s 缺少值", name)
 				}
@@ -219,7 +232,7 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 		args = slices.DeleteFunc(slices.Clone(args), func(s string) bool { return s == "--json" })
 	}
 	spec, tail, err := findCommand(args)
-	i := invocation{ctx: context.Background(), spec: spec, binding: binding, extensionDirs: trusted.ExtensionDirs, clock: clock, version: version, getenv: getenv, userHomeDir: userHomeDir}
+	i := invocation{stderr: stderr, ctx: context.Background(), spec: spec, binding: binding, extensionDirs: trusted.ExtensionDirs, clock: clock, version: version, getenv: getenv, userHomeDir: userHomeDir}
 	if err == nil {
 		err = i.parse(tail)
 	}
@@ -231,6 +244,10 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 			err = fmt.Errorf("%w: 执行方只能操作自己的 Work", errDenied)
 		default:
 			i.home, err = app.StateHome(getenv, userHomeDir)
+			group, _, _ := strings.Cut(spec.path, " ")
+			if err == nil && i.extensionDirs == nil && (group == "daemon" || group == "ext") {
+				i.extensionDirs = app.ExtensionDirs(i.home, getenv("CRAFT_EXTENSIONS"))
+			}
 		}
 	}
 	if err != nil {
@@ -251,7 +268,7 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 }
 
 func failure(w io.Writer, asJSON bool, err error) int {
-	code, exit := "internalError", 1
+	code, exit := rpcFailure(err)
 	detail := map[string]string{}
 	message := err.Error()
 	if e, ok := errors.AsType[*engine.UserError](err); ok {
@@ -273,7 +290,9 @@ func failure(w io.Writer, asJSON bool, err error) int {
 			code, exit = "invalidArguments", 2
 		case errors.Is(err, errDenied), errors.Is(err, app.ErrOtherWork):
 			code, exit = "denied", 4
-		case errors.Is(err, errDependency), errors.Is(err, app.ErrObjectKinds):
+		case errors.Is(err, errMissing):
+			code, exit = "missing", 5
+		case errors.Is(err, errOwned), errors.Is(err, errDependency), errors.Is(err, app.ErrObjectKinds):
 			code, exit = "unavailable", 6
 		}
 	}

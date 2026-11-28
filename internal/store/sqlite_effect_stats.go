@@ -9,8 +9,10 @@ import (
 
 // EffectStats 描述该类仍在队中的行。Oldest 是最早的入队时间，LastError 来自最近失败且未被覆盖的行。
 type EffectStats struct {
-	Waiting, MaxAttempts int
-	Oldest, LastError    string
+	Waiting     int    `json:"waiting"`
+	MaxAttempts int    `json:"maxAttempts"`
+	Oldest      string `json:"oldest"`
+	LastError   string `json:"lastError"`
 }
 
 const effectStatsQuery = `SELECT waiting,

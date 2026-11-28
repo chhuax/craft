@@ -47,19 +47,23 @@ func attention(i *invocation) (result, error) {
 		if err != nil {
 			return result{}, err
 		}
-		if c := i.flags["--cursor"]; c != "" {
-			at := slices.IndexFunc(items, func(item engine.AttentionItem) bool { return item.ID == c })
-			if at < 0 {
-				return result{}, invalid("待办游标已失效")
-			}
-			items = items[at+1:]
-		}
-		page := map[string]any{"items": items[:min(len(items), pageSize)]}
-		if len(items) > pageSize {
-			page["nextCursor"] = items[pageSize-1].ID
-		}
-		return data(page)
+		return attentionPage(items, i.flags["--cursor"])
 	})
+}
+
+func attentionPage(items []engine.AttentionItem, c string) (result, error) {
+	if c != "" {
+		at := slices.IndexFunc(items, func(item engine.AttentionItem) bool { return item.ID == c })
+		if at < 0 {
+			return result{}, invalid("待办游标已失效")
+		}
+		items = items[at+1:]
+	}
+	page := map[string]any{"items": items[:min(len(items), pageSize)]}
+	if len(items) > pageSize {
+		page["nextCursor"] = items[pageSize-1].ID
+	}
+	return data(page)
 }
 
 type workRow struct {
@@ -82,22 +86,26 @@ func listWorks(i *invocation) (result, error) {
 		}
 	}
 	return i.view(func(r app.CommandReader) (result, error) {
-		works, err := r.WorkPage(open, thread, i.flags["--cursor"], pageSize+1)
-		if err != nil {
-			return result{}, err
-		}
-		page := map[string]any{}
-		if len(works) > pageSize {
-			works = works[:pageSize]
-			page["nextCursor"] = works[pageSize-1].ID
-		}
-		items := make([]workRow, len(works))
-		for n, w := range works {
-			items[n] = workSummary(w)
-		}
-		page["items"] = items
-		return data(page)
+		return workPage(r, open, thread, i.flags["--cursor"])
 	})
+}
+
+func workPage(r app.CommandReader, open bool, thread, cursor string) (result, error) {
+	works, err := r.WorkPage(open, thread, cursor, pageSize+1)
+	if err != nil {
+		return result{}, err
+	}
+	page := map[string]any{}
+	if len(works) > pageSize {
+		works = works[:pageSize]
+		page["nextCursor"] = works[pageSize-1].ID
+	}
+	items := make([]workRow, len(works))
+	for n, w := range works {
+		items[n] = workSummary(w)
+	}
+	page["items"] = items
+	return data(page)
 }
 
 func events(i *invocation) (result, error) {
@@ -106,26 +114,42 @@ func events(i *invocation) (result, error) {
 		return result{}, err
 	}
 	return i.view(func(r app.CommandReader) (result, error) {
-		ev, err := r.Events(since, pageSize+1)
-		if err != nil {
-			return result{}, err
-		}
-		page := map[string]any{}
-		if len(ev) > pageSize {
-			ev = ev[:pageSize]
-			page["nextSince"] = ev[pageSize-1].Rev
-		}
-		items := make([]any, len(ev))
-		for n, e := range ev {
-			raw, err := json.Marshal(e.Data)
-			if err != nil {
-				return result{}, err
-			}
-			items[n] = map[string]any{"rev": e.Rev, "type": e.Type, "at": e.At, "ref": e.Ref, "data": preview(raw)}
-		}
-		page["items"] = items
-		return data(page)
+		p, err := eventPage(r, since, pageSize)
+		return result{payload: p}, err
 	})
+}
+
+type eventRow struct {
+	Rev  int64             `json:"rev"`
+	Type string            `json:"type"`
+	At   string            `json:"at"`
+	Ref  map[string]string `json:"ref"`
+	Data any               `json:"data"`
+}
+type eventBatch struct {
+	Items     []eventRow `json:"items"`
+	NextSince int64      `json:"nextSince,omitzero"`
+}
+
+func eventPage(r app.CommandReader, since int64, limit int) (eventBatch, error) {
+	var page eventBatch
+	ev, err := r.Events(since, limit+1)
+	if err != nil {
+		return page, err
+	}
+	if len(ev) > limit {
+		ev = ev[:limit]
+		page.NextSince = ev[limit-1].Rev
+	}
+	page.Items = make([]eventRow, len(ev))
+	for n, e := range ev {
+		raw, err := json.Marshal(e.Data)
+		if err != nil {
+			return page, err
+		}
+		page.Items[n] = eventRow{e.Rev, e.Type, e.At, e.Ref, preview(raw)}
+	}
+	return page, nil
 }
 
 func decisions(i *invocation) (result, error) {

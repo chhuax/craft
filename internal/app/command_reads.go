@@ -18,7 +18,16 @@ type Status struct {
 
 // Status 只读取事务计数和可能产生待办的活跃集。
 func (r CommandReader) Status() (Status, error) {
-	var s Status
+	items, err := r.Attention()
+	if err != nil {
+		return Status{}, err
+	}
+	return r.Counts(len(items))
+}
+
+// Counts 合并同一快照已算出的待办数与库内计数，避免分页前重复推导待办。
+func (r CommandReader) Counts(attention int) (Status, error) {
+	s := Status{Attention: attention}
 	rows, err := r.lookup("totals")
 	if err != nil {
 		return s, err
@@ -32,9 +41,7 @@ func (r CommandReader) Status() (Status, error) {
 			return s, fmt.Errorf("读取 %s 总数: %w", row.Key, err)
 		}
 	}
-	items, err := r.Attention()
-	s.Attention = len(items)
-	return s, err
+	return s, nil
 }
 
 // Attention 先选有可能产生待办的 Work 和 Thread，再让引擎从完整的相关历史判断取代关系。

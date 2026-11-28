@@ -26,6 +26,8 @@ type DaemonConfig struct {
 	AlarmLimit     int
 	AlarmOverrides map[string]AlarmOverride
 	OnHealth       func()
+	// OnEvent 在提交后通知本地事件流，只能置位，不得等待客户端。
+	OnEvent func()
 }
 
 // AlarmOverride 以扩展限定的闹钟 ID 寻址；省略的字段沿用 manifest。
@@ -34,17 +36,19 @@ type AlarmOverride struct {
 	Enabled *bool
 }
 
-// Daemon 组合单个状态目录中的服务。进程入口、单实例保护和本地 JSON 接口留给后续任务。
+// Daemon 组合单个状态目录中的服务。进程入口负责取得单实例锁并收回本地连接。
 // 一个实例只管理一次启停，调用方用 Done 等待指纹变化后的退出。
 type Daemon struct {
-	cfg     DaemonConfig
-	health  *daemonHealth
-	db      *store.SQLite
-	runtime *Runtime
-	hosts   map[string]*exthost.Host
-	order   []string
-	alarms  *alarm.Service
-	queue   *alarmQueue
+	initialFingerprint string
+	knownExtensions    map[string]bool
+	cfg                DaemonConfig
+	health             *daemonHealth
+	db                 *store.SQLite
+	runtime            *Runtime
+	hosts              map[string]*exthost.Host
+	order              []string
+	alarms             *alarm.Service
+	queue              *alarmQueue
 
 	mu      sync.Mutex
 	started bool
@@ -117,11 +121,16 @@ func (d *Daemon) start(ctx, run context.Context) error {
 	d.db = db
 	// 先取装载前的指纹，装载期间变动也会在下一拍被发现。
 	fingerprint := d.fingerprint()
+	d.initialFingerprint = fingerprint
 	result := exthost.Discover(d.cfg.ExtensionDirs...)
 	for path, err := range result.Rejected {
 		d.health.set(d.health.state.Rejected, path, "rejected", err.Error())
 	}
-	extensions := d.compatible(result.Extensions)
+	extensions, err := d.selected(ctx, result.Extensions)
+	if err != nil {
+		return err
+	}
+	extensions = d.compatible(extensions)
 	if err := d.startRuntime(ctx, extensions); err != nil {
 		return err
 	}
@@ -156,6 +165,7 @@ func (d *Daemon) startRuntime(ctx context.Context, extensions []exthost.Extensio
 		return err
 	}
 	d.runtime.effects = effects
+	d.runtime.repo.onEvent = d.cfg.OnEvent
 	// 启动调用者可在成功后释放 ctx。执行池一直保留到 Pass 退出之后。
 	if err := ctx.Err(); err != nil {
 		return err
@@ -297,7 +307,7 @@ func (d *Daemon) monitor(ctx context.Context, timer *time.Timer, fingerprint str
 		case <-timer.C:
 		}
 		timer = d.cfg.Clock.NewTimer(passPeriod)
-		if now := d.fingerprint(); now != "" && now != fingerprint {
+		if d.fingerprintChanged(fingerprint) {
 			return
 		}
 		if err := d.queue.poll(ctx); err != nil && ctx.Err() == nil {

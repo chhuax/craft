@@ -38,7 +38,7 @@ type EffectResult struct {
 // HealthState 是一个 kind 的队列快照，Status 取 ok、paused 或 error。
 type HealthState struct {
 	store.EffectStats
-	Status string
+	Status string `json:"status"`
 }
 
 type effectScheduler struct {

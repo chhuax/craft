@@ -40,12 +40,12 @@ type Config struct {
 
 // Snapshot 是单个闹钟的值副本。未安排周期时 Next 为零，尚无结果时 LastResult 为空。
 type Snapshot struct {
-	ID                  string
-	Next                time.Time
-	LastResult          string // success、failed 或 skipped
-	LastError           string
-	ConsecutiveFailures int
-	State               string // idle、running、backoff、disabled 或 stopped
+	ID                  string    `json:"id"`
+	Next                time.Time `json:"next"`
+	LastResult          string    `json:"lastResult"` // success、failed 或 skipped
+	LastError           string    `json:"lastError"`
+	ConsecutiveFailures int       `json:"consecutiveFailures"`
+	State               string    `json:"state"` // idle、running、backoff、disabled 或 stopped
 }
 
 func (spec AlarmSpec) validate() (time.Time, error) {
