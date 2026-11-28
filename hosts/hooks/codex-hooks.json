@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{
+        "type": "command",
+        "command": "sh \"${PLUGIN_ROOT}/bin/craft\" hook session-start --host codex",
+        "commandWindows": "\"${PLUGIN_ROOT}\\bin\\craft.exe\" hook session-start --host codex",
+        "statusMessage": "正在读取 craft 工作状态",
+        "timeout": 15
+      }]
+    }]
+  }
+}

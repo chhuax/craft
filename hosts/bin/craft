@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+system=$(uname -s)
+machine=$(uname -m)
+case "$system" in
+    Darwin) platform=darwin ;;
+    Linux) platform=linux ;;
+    MINGW*|MSYS*|CYGWIN*) platform=windows ;;
+    *) echo "craft 不支持系统 $system" >&2; exit 1 ;;
+esac
+case "$machine" in
+    x86_64|amd64) arch=amd64 ;;
+    arm64|aarch64) arch=arm64 ;;
+    *) echo "craft 不支持架构 $machine" >&2; exit 1 ;;
+esac
+
+dir=$(dirname "$0")
+case "$platform-$arch" in
+    windows-amd64) binary=$dir/craft.exe ;;
+    windows-*) echo "craft 不支持 $system $machine" >&2; exit 1 ;;
+    *) binary=$dir/$platform-$arch/craft ;;
+esac
+if [ ! -x "$binary" ] || [ ! -f "$binary" ]; then
+    echo "craft 找不到可执行文件 ${binary}，请检查插件包是否完整" >&2
+    exit 1
+fi
+exec "$binary" "$@"

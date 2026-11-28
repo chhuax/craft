@@ -1,0 +1,13 @@
+{
+  "name": "craft",
+  "description": "在人的会话和后台派工之间跟进工作、回报进度并确认外发。",
+  "skills": "./skills/",
+  "hooks": "./hooks/codex-hooks.json",
+  "interface": {
+    "displayName": "craft 工作助手",
+    "shortDescription": "查看进展和待办，接收后台工作的回报。",
+    "longDescription": "在主会话中发起工作、回答问题、核对对外操作。在派工会话中读取当前事实、处理工作并回报结果。",
+    "category": "Productivity",
+    "defaultPrompt": ["查看有哪些工作等我处理。"]
+  }
+}

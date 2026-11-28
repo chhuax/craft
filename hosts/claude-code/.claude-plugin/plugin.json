@@ -1,0 +1,9 @@
+{
+  "name": "craft",
+  "displayName": "craft 工作助手",
+  "description": "查看工作进展、处理待办，并在会话里确认对外操作。",
+  "author": { "name": "craft 贡献者" },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/chhuax/craft",
+  "homepage": "https://github.com/chhuax/craft"
+}

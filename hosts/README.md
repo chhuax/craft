@@ -1,5 +1,14 @@
-# 宿主适配
+# craft 工作助手
 
-这里维护两个宿主（首批是 Claude Code 与 Codex）的清单、共用的 skill 与各自的 hook 文件。发布时它们和全部系统的二进制一起组成**一个通用的包**，两个宿主共用，一次安装，见 [ADR 0004](../docs/adr/0004-single-universal-package.md)。
+在 Claude Code 或 Codex 里问「哪些工作在等我？」即可查看待办、回答后台问题或确认对外操作。两个宿主使用同一份包，包含 macOS 和 Linux 的 arm64、amd64 入口，以及 Windows amd64 入口。
 
-各宿主的真实机制（清单位置、`bin/` 是否进 PATH、hook 的命令形态与信任、marketplace 来源）已在 ADR 0004 里逐项核实；其中标为「待验证」的几项，要在做宿主薄包时用真实宿主实测，结论写在这里。
+## 安装与使用
+
+1. 在所用宿主的插件市场中选择 **craft** 并启用。Claude Code 可运行 `/plugin install craft --marketplace <owner>/<repo>`，将占位符换成提供该插件的市场仓库。自建市场时，将插件来源指向已组装的分发仓库根目录，用 `url` 或 `git-subdir` 固定发布版本的 ref 或 sha。
+2. 在 Codex 中审阅并信任 SessionStart hook，再打开新会话。升级后如宿主要求，请重新审阅。
+3. 问「列出进行中的工作」或「有什么需要我决定」。Claude Code 里也可以运行 `craft watch status`。Codex 使用开场给出的可执行文件绝对路径。需要后台执行时，运行 `craft daemon start`。
+4. 如果没有开场提示，仍可直接使用插件目录下的 `bin/craft`，Windows 使用 `bin\craft.exe`。状态存放在用户目录下的 `.craft`，也可用 `CRAFT_HOME` 指定。
+
+## 已知限制
+
+Claude Code 2.1.330 在 macOS arm64 上已验证 git 来源安装、可执行位和 Bash 中的裸命令。Windows 的 Claude Code hook 需要 sh。仅有 PowerShell 时请用可执行文件入口。Codex 的安装、开场上下文注入和升级后是否重新审阅，仍待真实宿主验证。
