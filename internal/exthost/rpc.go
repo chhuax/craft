@@ -183,6 +183,15 @@ func (c *Conn) writeLoop() {
 
 // Call 发起请求并将成功响应解码到 result；传 nil 可只等待完成。超时由 ctx 控制。
 func (c *Conn) Call(ctx context.Context, method string, params, result any) error {
+	return c.call(ctx, method, params, result, false)
+}
+
+// CallWaiting 在取消后仍等待远端响应或断连，供需要保留运行名额的调用使用。
+func (c *Conn) CallWaiting(ctx context.Context, method string, params, result any) error {
+	return c.call(ctx, method, params, result, true)
+}
+
+func (c *Conn) call(ctx context.Context, method string, params, result any, wait bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -209,11 +218,19 @@ func (c *Conn) Call(ctx context.Context, method string, params, result any) erro
 	var msg envelope
 	select {
 	case <-ctx.Done():
-		// 取消排在原请求之后；即使对端不读 stdin，也不能阻塞调用者返回。
+		// 取消通知排在原请求之后。闹钟还占用远端名额，只有响应或断连才能释放。
 		_ = c.send(outboundRequest{JSONRPC: protocol.JSONRPCVersion, Method: "$/cancel", Params: struct {
 			ID uint64 `json:"id"`
 		}{id}})
-		return ctx.Err()
+		if !wait {
+			return ctx.Err()
+		}
+		select {
+		case <-reply:
+			return ctx.Err()
+		case <-c.ctx.Done():
+			return c.failure()
+		}
 	case msg = <-reply:
 	case <-c.ctx.Done():
 		// 对端可能在写完最后一个响应后立即退出，已送达的响应优先于 EOF。

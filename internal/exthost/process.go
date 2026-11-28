@@ -298,18 +298,30 @@ func (h *Host) Stop() error {
 // Call 在当前已握手的连接上传递请求。扩展自定义端口可使用自己的参数和结果类型。
 // 退避期间立即返回 ErrUnavailable，避免在新的扩展进程里隐式重放旧请求。
 func (h *Host) Call(ctx context.Context, method string, params, result any) error {
-	h.mu.RLock()
-	c := h.ready
-	h.mu.RUnlock()
-	if c == nil || h.life.Err() != nil {
+	c := h.connection()
+	if c == nil {
 		return ErrUnavailable
 	}
 	return c.Call(ctx, method, params, result)
 }
 
+func (h *Host) connection() *Conn {
+	h.mu.RLock()
+	c := h.ready
+	h.mu.RUnlock()
+	if h.life.Err() != nil {
+		return nil
+	}
+	return c
+}
+
 // AlarmRun 将原定触发时刻转发给扩展，调用方通过 ctx 控制超时。
 func (h *Host) AlarmRun(ctx context.Context, alarmID, reason string, scheduledAtMs int64) error {
-	return h.Call(ctx, "alarm/run", protocol.AlarmRunParams{AlarmID: alarmID, Reason: reason, ScheduledAtMs: scheduledAtMs}, nil)
+	c := h.connection()
+	if c == nil {
+		return ErrUnavailable
+	}
+	return c.CallWaiting(ctx, "alarm/run", protocol.AlarmRunParams{AlarmID: alarmID, Reason: reason, ScheduledAtMs: scheduledAtMs}, nil)
 }
 
 // ActionExecute 转发预览或执行请求；返回体的业务字段由动作定义。

@@ -294,3 +294,39 @@ func TestDiscoverSourceOwners(t *testing.T) {
 		})
 	}
 }
+
+func TestManifestRejectsKeySeparators(t *testing.T) {
+	for _, tc := range []struct{ field, id, extra string }{
+		{"id", "a:b", ""},
+		{"alarms", "demo", `,"alarms":[{"id":"a:b","every":"1s"}]`},
+		{"watch_sources", "demo", `,"watch_sources":[{"id":"a:b","thread_kinds":[{"id":"c"}]}]`},
+		{"thread_kinds", "demo", `,"watch_sources":[{"id":"a","thread_kinds":[{"id":"b:c"}]}]`},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			// 后两种声明都能拼出 a:b:c:id，因此分别在解析 manifest 时就必须失败。
+			p := putManifest(t, t.TempDir(), "demo", manifestText(tc.id, tc.extra))
+			_, err := loadManifest(p)
+			if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "冒号") {
+				t.Fatalf("标识校验 %v", err)
+			}
+		})
+	}
+}
+
+func TestDiscoverRejectsCollidingThreadKeys(t *testing.T) {
+	root := t.TempDir()
+	paths := make([]string, 0, 2)
+	for _, tc := range []struct{ id, source, kind string }{{"left", "a:b", "c"}, {"right", "a", "b:c"}} {
+		extra := fmt.Sprintf(`,"watch_sources":[{"id":%q,"thread_kinds":[{"id":%q}]}]`, tc.source, tc.kind)
+		paths = append(paths, putManifest(t, root, tc.id, manifestText(tc.id, extra)))
+	}
+	result := Discover(root)
+	if len(result.Extensions) != 0 {
+		t.Fatal("可拼出相同对象键的声明通过了装载", result.Extensions)
+	}
+	for _, p := range paths {
+		if result.Rejected[p] == nil {
+			t.Fatalf("没有拒绝 %s", p)
+		}
+	}
+}

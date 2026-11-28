@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/chhuax/craft/pkg/protocol"
@@ -361,4 +362,32 @@ func TestHandlerErrorWithInvalidData(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("错误详情编码失败后丢失了响应")
 	}
+}
+
+func TestAlarmRunWaitsForRemote(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := wire(t, nil, 0)
+		h := Host{ready: p.Conn, life: t.Context()}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- h.AlarmRun(ctx, "poll", "schedule", 42) }()
+		var request, notification protocol.Request
+		p.read(t, &request)
+		<-ctx.Done()
+		p.read(t, &notification)
+		if notification.Method != "$/cancel" {
+			t.Fatal(notification)
+		}
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("远端尚未结束: %v", err)
+		default:
+		}
+		p.send(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{}}`, request.ID))
+		if err := <-done; !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal(err)
+		}
+	})
 }

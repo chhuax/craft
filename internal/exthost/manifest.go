@@ -210,6 +210,8 @@ const ReservedSource = "craft"
 
 func (m *Manifest) validate() error {
 	switch {
+	case strings.Contains(m.ID, ":"):
+		return fmt.Errorf("id %q 含冒号", m.ID)
 	case !validID(m.ID):
 		return fmt.Errorf("id 须为单个非空目录名")
 	case m.Version == "":
@@ -230,6 +232,9 @@ func (m *Manifest) validate() error {
 	}
 	alarms := map[string]bool{}
 	for _, a := range m.Alarms {
+		if strings.Contains(a.ID, ":") {
+			return fmt.Errorf("alarms.id %q 含冒号", a.ID)
+		}
 		if alarms[a.ID] {
 			return fmt.Errorf("alarms.id 重复 %q", a.ID)
 		}
@@ -238,6 +243,9 @@ func (m *Manifest) validate() error {
 	events := make(map[string]bool)
 	for i := range m.WatchSources {
 		s := &m.WatchSources[i]
+		if strings.Contains(s.ID, ":") {
+			return fmt.Errorf("watch_sources[%d].id %q 含冒号", i, s.ID)
+		}
 		if s.ID == "" {
 			return fmt.Errorf("watch_sources[%d].id 不能为空", i)
 		}
@@ -245,6 +253,9 @@ func (m *Manifest) validate() error {
 			return fmt.Errorf("watch_sources[%d].id 不能使用保留名 %q：它属于内核内置的人事件，扩展声明它就能伪造「人发起的请求」", i, s.ID)
 		}
 		for j, k := range s.ThreadKinds {
+			if strings.Contains(k.ID, ":") {
+				return fmt.Errorf("watch_sources[%d].thread_kinds[%d].id %q 含冒号", i, j, k.ID)
+			}
 			if k.ID == "" {
 				return fmt.Errorf("watch_sources[%d].thread_kinds[%d].id 不能为空", i, j)
 			}
