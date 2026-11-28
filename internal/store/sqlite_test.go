@@ -15,7 +15,7 @@ import (
 	"modernc.org/sqlite"
 )
 
-func openTestDB(t *testing.T, path string) *SQLite {
+func openTestDB(t testing.TB, path string) *SQLite {
 	t.Helper()
 	s, err := OpenSQLite(t.Context(), path, nil)
 	if err != nil {
@@ -291,4 +291,43 @@ func TestActiveIndexes(t *testing.T) {
 			t.Errorf("%s 的活跃集未使用部分索引：%s", table, detail)
 		}
 	}
+}
+
+// BenchmarkPutMany 比较同一批 1000 份文档逐条提交与整批提交到 SQLite 文件的耗时。
+func BenchmarkPutMany(b *testing.B) {
+	const collection = "watch_kv"
+	docs := make([]Doc, 1000)
+	for i := range docs {
+		docs[i] = Doc{Key: strconv.Itoa(i), Value: json.RawMessage(`{"active":true}`)}
+	}
+	ctx := b.Context()
+	run := func(name string, write func(*SQLite) error) {
+		b.Run(name, func(b *testing.B) {
+			s := openTestDB(b, filepath.Join(b.TempDir(), "bench.db"))
+			for b.Loop() {
+				// 在计时外清表，确保每轮都实际插入 1000 行。
+				b.StopTimer()
+				if _, err := s.writer.ExecContext(ctx, "DELETE FROM watch_kv"); err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+				if err := write(s); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+	run("Put", func(s *SQLite) error {
+		for _, doc := range docs {
+			if err := s.Atomic(ctx, func(tx Tx) error {
+				return tx.Put(collection, doc.Key, doc.Value)
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	run("PutMany", func(s *SQLite) error {
+		return s.Atomic(ctx, func(tx Tx) error { return tx.PutMany(collection, docs) })
+	})
 }
