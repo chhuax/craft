@@ -9,13 +9,20 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
-// StateStore 是确认记录的存放端口。Load 在记录不存在时返回 nil, nil。
+// StateStore 在同一变更名下存放确认、任务清单及证据日志，读取不存在的记录返回空值。
 type StateStore interface {
 	Load(change string) (*Confirmation, error)
 	Save(change string, c Confirmation) error
+	LoadTasks(change string) (string, error)
+	SaveTasks(change, text string) error
+	LoadLedger(change string) ([]Record, error)
+	RecordClosing(change string, at time.Time, run ClosingRun) error
+	RecordReview(change string, at time.Time, current string, req Document, report VerifierReport) error
+	RecordFact(change string, at time.Time, fact string) error
 }
 
 type fileStore struct {
@@ -146,6 +153,13 @@ func saveRecord(dir *os.Root, name string, data []byte) error {
 	if _, err := loadRecord(dir, name); err != nil {
 		return err
 	}
+	if err := ensureIgnored(dir); err != nil {
+		return err
+	}
+	return atomicWrite(dir, name, data, false)
+}
+
+func ensureIgnored(dir *os.Root) error {
 	if info, err := dir.Stat(".gitignore"); errors.Is(err, os.ErrNotExist) {
 		if err := atomicWrite(dir, ".gitignore", []byte("*\n"), true); err != nil {
 			return err
@@ -155,7 +169,7 @@ func saveRecord(dir *os.Root, name string, data []byte) error {
 	} else if !info.Mode().IsRegular() {
 		return fmt.Errorf("状态目录的 .gitignore 不是普通文件")
 	}
-	return atomicWrite(dir, name, data, false)
+	return nil
 }
 
 func atomicWrite(dir *os.Root, name string, data []byte, exclusive bool) (err error) {
