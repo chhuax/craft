@@ -16,7 +16,7 @@ import (
 	"github.com/chhuax/craft/internal/host"
 )
 
-const hostName = "claude-code"
+const hostName = host.ClaudeCode
 
 var envPrefixes = []string{"ANTHROPIC_", "CLAUDE_"}
 

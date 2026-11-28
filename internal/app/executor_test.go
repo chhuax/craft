@@ -1000,7 +1000,7 @@ func TestExecutorUnavailableHost(t *testing.T) {
 	d := NewDaemon(DaemonConfig{StateDir: dir, Clock: newTestClock()})
 	checkErr(t, d.Start(t.Context()))
 	t.Cleanup(func() { checkErr(t, d.Stop(context.Background())) })
-	for _, name := range []string{"codex", "claude-code"} {
+	for _, name := range []string{"codex", host.ClaudeCode} {
 		if d.Health().Reports["executor"][name].Status != "unavailable" {
 			t.Fatal(d.Health())
 		}

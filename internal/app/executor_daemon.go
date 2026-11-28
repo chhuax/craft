@@ -48,9 +48,9 @@ func (d *Daemon) setupExecutor() error {
 	if s := settings.MergeMaxWaitSeconds; s != nil && *s >= 0 {
 		x.maxWait = time.Duration(*s) * time.Second
 	}
-	for _, name := range []string{"claude-code", "codex"} {
+	for _, name := range []string{host.ClaudeCode, "codex"} {
 		cmd := name
-		if name == "claude-code" {
+		if name == host.ClaudeCode {
 			cmd = "claude"
 		}
 		program, err := exec.LookPath(cmd)
@@ -58,7 +58,7 @@ func (d *Daemon) setupExecutor() error {
 			d.health.report("executor", name, HealthEntry{"unavailable", err.Error()})
 			continue
 		}
-		if name == "claude-code" {
+		if name == host.ClaudeCode {
 			x.drivers[name] = claudecode.New(program, x.lookupSession)
 		} else {
 			x.drivers[name] = codex.New(program)
