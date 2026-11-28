@@ -17,10 +17,12 @@ import (
 	"time"
 
 	"github.com/chhuax/craft/internal/alarm"
+	"github.com/chhuax/craft/internal/cred"
 	"github.com/chhuax/craft/internal/engine"
 	"github.com/chhuax/craft/internal/exthost"
 	"github.com/chhuax/craft/internal/store"
 	"github.com/chhuax/craft/pkg/protocol"
+	"github.com/zalando/go-keyring"
 )
 
 func TestMain(m *testing.M) {
@@ -198,18 +200,27 @@ func installTestManifest(t *testing.T, root, id, src string, major int, executab
 		_, err = io.Copy(out, in)
 		checkErr(t, errors.Join(err, in.Close(), out.Close()))
 	}
-	manifest := fmt.Sprintf(`{"id":%q,"version":"1","protocol":%d,"exec":[%q,"--d1-extension"],"watch_sources":[{"id":%q,"thread_kinds":[{"id":"item","closable":true}],"events":[{"id":"change","default":"auto","strength":"explicit"}]}],"alarms":[{"id":"poll","every":"1h"}]}`, id, major, name, src)
+	manifest := fmt.Sprintf(`{"id":%q,"version":"1","protocol":%d,"env":["GORACE"],"exec":[%q,"--d1-extension"],"watch_sources":[{"id":%q,"thread_kinds":[{"id":"item","closable":true}],"events":[{"id":"change","default":"auto","strength":"explicit"}]}],"alarms":[{"id":"poll","every":"1h"}]}`, id, major, name, src)
 	p := filepath.Join(dir, "manifest.json")
 	checkErr(t, os.WriteFile(p, []byte(manifest), 0600))
 	return p
 }
 
 func TestDaemonEndToEnd(t *testing.T) {
+	keyring.MockInit()
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	root := t.TempDir()
 	// 接单已有可启动的目标；扩展生命周期测试不能发现本机的真实宿主。
 	t.Setenv("PATH", root)
 	manifest := installTestManifest(t, root, "reader", "feed", 1, true)
+	raw, err := os.ReadFile(manifest)
+	checkErr(t, err)
+	var declaration map[string]json.RawMessage
+	checkErr(t, json.Unmarshal(raw, &declaration))
+	declaration["credentials"] = json.RawMessage(`[{"name":"default","env":"READER_TOKEN"}]`)
+	raw, err = json.Marshal(declaration)
+	checkErr(t, err)
+	checkErr(t, os.WriteFile(manifest, raw, 0600))
 	installTestManifest(t, root, "second", "other", 1, true)
 	bad := installTestManifest(t, root, "forged", "craft", 1, false)
 	installTestManifest(t, root, "future", "future", 2, false)
@@ -252,6 +263,9 @@ func TestDaemonEndToEnd(t *testing.T) {
 	if health.Rejected[bad].Status != "rejected" || health.Extensions["future"].Status != "incompatible" || health.Extensions["reader"].Status != "ready" {
 		t.Fatal(health)
 	}
+	if !strings.Contains(health.Extensions["reader"].Detail, "reader/default") || !strings.Contains(health.Extensions["reader"].Detail, "warning") {
+		t.Fatal("已就绪扩展缺少凭据告警")
+	}
 	created := make(chan string, 1)
 	d.runtime.repo.Subscribe(func(e engine.Event) {
 		if e.Type == "decision.recorded" {
@@ -293,7 +307,7 @@ func TestDaemonEndToEnd(t *testing.T) {
 	h := d.hosts["reader"]
 	at := map[string]string{"at": clock.Now().Format(time.RFC3339Nano)}
 	checkErr(t, d.hosts["second"].Call(ctx, "fixture/describe", struct{}{}, nil))
-	err := h.Call(ctx, "fixture/foreign", at, nil)
+	err = h.Call(ctx, "fixture/foreign", at, nil)
 	rpc, ok := errors.AsType[*protocol.Error](err)
 	if !ok || rpc.Code != -32602 {
 		t.Fatalf("越权结果 %v", err)
@@ -322,8 +336,12 @@ func TestDaemonEndToEnd(t *testing.T) {
 	}
 	await(func() bool { return d.Health().Extensions["reader"].Status == "restarting" })
 	clock.waitTimers(t, passPeriod, 3)
+	checkErr(t, cred.New(stateDir).Set("reader", "default", "in-memory-value"))
 	clock.advance(2 * time.Second)
 	await(func() bool { return d.Health().Extensions["reader"].Status == "ready" })
+	if d.Health().Extensions["reader"].Detail != "" {
+		t.Fatal("重启后仍有旧的凭据告警")
+	}
 	checkErr(t, h.Call(ctx, "fixture/close", at, nil))
 	checkErr(t, d.runtime.repo.Read(ctx, func(r engine.Reader) error {
 		w, err := r.GetWork(work)

@@ -15,7 +15,6 @@ func TestGitHubExtension(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "github")
 	must(t, os.Mkdir(dir, 0700))
 	t.Setenv("CRAFT_HOME", t.TempDir())
-	t.Setenv("CRAFT_FIXTURE_GITHUB_TOKEN", "offline-replay")
 	t.Setenv("GOPROXY", "off")
 	t.Setenv("GOSUMDB", "off")
 	data, err := os.ReadFile(filepath.Join(src, "manifest.json"))

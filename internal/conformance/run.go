@@ -197,7 +197,10 @@ func (s *suite) start(label string) (*session, string, error) {
 	}
 	k := newKernel(s.scope, s.now)
 	s.trace.begin(label)
-	conn, finish, err := exthost.OpenProcess(s.ext, s.temp, k.handle, s.trace.wire)
+	conn, finish, err := exthost.OpenProcess(s.ext, s.temp, k.handle, s.trace.wire, func(_, _ string) (string, bool, error) {
+		// 回放只需能通过扩展的登录检查，不能读取真实保险库。
+		return "offline-replay", s.replay != nil, nil
+	})
 	if err != nil {
 		return nil, "", err
 	}

@@ -113,7 +113,7 @@ func actionManifest(t testing.TB, home, id, actions string) {
 			t.Fatal(err)
 		}
 	}
-	raw := fmt.Sprintf(`{"id":%q,"version":"1","protocol":1,"exec":[%q,"--action-fixture"],"actions":[%s]}`, id, name, actions)
+	raw := fmt.Sprintf(`{"id":%q,"version":"1","protocol":1,"env":["GORACE"],"exec":[%q,"--action-fixture"],"actions":[%s]}`, id, name, actions)
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(raw), 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -41,7 +41,7 @@ func extension(t testing.TB, mode string) (string, string) {
 		alarms = append(alarms, map[string]string{"id": id, "every": "1h"})
 	}
 	writeJSON(t, filepath.Join(dir, "manifest.json"), map[string]any{
-		"id": "sample", "version": "1", "protocol": 1, "exec": []string{name, "--craft-conformance-helper", mode},
+		"env": []string{"GORACE"}, "id": "sample", "version": "1", "protocol": 1, "exec": []string{name, "--craft-conformance-helper", mode},
 		"alarms": alarms, "watch_sources": []any{map[string]any{"id": "feed",
 			"thread_kinds": []any{map[string]any{"id": "item", "object_type": "feed.item", "closable": true}},
 			"events":       []any{map[string]string{"id": "change", "default": "observe", "strength": "explicit"}}}},

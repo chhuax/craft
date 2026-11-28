@@ -118,7 +118,7 @@ func TestProcessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = gate.Close() }()
-	manifest := fmt.Sprintf(`{"id":"sample","version":"1","protocol":1,"exec":[%q,"--alarm-fixture",%q],"watch_sources":[{"id":"feed","thread_kinds":[{"id":"item"}]}],"alarms":[{"id":"poll","every":"1h"}]}`, name, gate.Addr().String())
+	manifest := fmt.Sprintf(`{"id":"sample","version":"1","protocol":1,"env":["GORACE"],"exec":[%q,"--alarm-fixture",%q],"watch_sources":[{"id":"feed","thread_kinds":[{"id":"item"}]}],"alarms":[{"id":"poll","every":"1h"}]}`, name, gate.Addr().String())
 	if err := os.WriteFile(filepath.Join(ext, "manifest.json"), []byte(manifest), 0600); err != nil {
 		t.Fatal(err)
 	}

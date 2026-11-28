@@ -16,12 +16,14 @@ import (
 
 // Manifest 保存装载所需的声明；由其他部件解释的字段保留原始 JSON。
 type Manifest struct {
-	ID          string      `json:"id"`
-	Version     string      `json:"version"`
-	Protocol    int         `json:"protocol"`
-	Exec        []string    `json:"exec"`
-	Requires    []string    `json:"requires"`
-	Alarms      []AlarmDecl `json:"alarms"`
+	ID          string           `json:"id"`
+	Version     string           `json:"version"`
+	Protocol    int              `json:"protocol"`
+	Exec        []string         `json:"exec"`
+	Env         []string         `json:"env,omitempty"`
+	Credentials []CredentialDecl `json:"credentials,omitempty"`
+	Requires    []string         `json:"requires"`
+	Alarms      []AlarmDecl      `json:"alarms"`
 	AlarmLimits struct {
 		Concurrency *int `json:"concurrency"`
 	} `json:"alarm_limits"`
@@ -230,6 +232,9 @@ func (m *Manifest) validate() error {
 		return fmt.Errorf("protocol 须为正整数主版本")
 	case len(m.Exec) == 0 || !filepath.IsLocal(m.Exec[0]) || filepath.Clean(m.Exec[0]) == ".":
 		return fmt.Errorf("exec[0] 须为扩展目录内的相对文件名")
+	}
+	if err := m.validateEnvironment(); err != nil {
+		return err
 	}
 	for _, id := range m.Requires {
 		if !validID(id) {
