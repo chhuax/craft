@@ -16,8 +16,13 @@ func Run(t *testing.T, factory func(t *testing.T) engine.Store) {
 		name  string
 		check func(*testing.T, engine.Store)
 	}{
+		{"外发问题与结果的代次", guardedReplies},
 		{"回执与未读边界", assignmentEdges},
 		{"批量发送重放", deliveryReplay},
+		{"回复与回执", replyCommands},
+		{"定向回答", answerCommand},
+		{"报告拒绝", reportRefusals},
+		{"执行事务回滚", commandRollback},
 		{"投递命令", deliveryCommands},
 		{"派工代次", generationCallbacks},
 		{"报告与轮末的完成判定", reportCompletion},
