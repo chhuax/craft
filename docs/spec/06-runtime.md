@@ -95,6 +95,7 @@ loop:
 
 - 内核闹钟登记一个清理任务（默认每天凌晨），调用 `prune(triggerBefore, workBefore, eventBefore)`。默认：已结束 Work 与 Decision 保留 90 天；`watch_trigger/disposition/trigger_thread` 保留 30 天；`watch_event` 保留 30 天且至少保留最近 5000 条。
 - **引用保护**（事务内现算，命中任一条绝不删）：所有 open Work 及其引用的 trigger；保留期内的已结束 Work、独立 Decision 及其引用的 trigger；非空 `Thread.pending/evaluating`、未完成 effect、未终态外发记录引用的对象。
+- **已关闭 Thread**：无任何引用且 `closed.at < workBefore` 时删除（用 `workBefore` 而非 `triggerBefore`：Thread 与 Work/Decision 同属长寿命记录，引擎靠 `closed.at` 忽略迟到通知，保护期应更长）；未关闭的永不删。引用只认持久化记录里显式保存的 Watch 对象 id；`reply` effect 载荷自带渠道与正文，不保护其派生 id 对应的 Trigger。`prune` 不读写 outbox。规格没写清的情形一律取「保留」。
 - **级联**（同事务）：删过期 Work 时同步从 Thread 的 `subscriptions/context` 移除；删过期 Trigger 时同步删处置与 `watch_trigger_thread`；删过期事件时更新 `watch_kv["event.min_rev"]`。
 - **`watch_trigger` 的保留期必须明显长于所有扩展的拉取回看窗口**（协议 03 §5.1：重放期 ≤ 7 天，清理期 30 天），否则被重复拉到的旧事件失去去重记录会再次入队。
 

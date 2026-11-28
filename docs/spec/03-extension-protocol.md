@@ -47,6 +47,8 @@
 }
 ```
 
+- **渠道与回复动作**：`ports.channels` 的元素是字符串（只收不发）或对象 `{"id": "<渠道 source>", "replyAction": "<动作 id>"}`。`replyAction` 必须是本扩展 `actions[]` 里声明的、非 `read_only` 的动作，否则拒绝加载；同一渠道 id 不得被两个扩展声明。内核发送确认与答复时调用它，参数固定为 `{"thread": <Channel.Thread 原样 JSON>, "body": <正文>}`，幂等键为消息 id；内核不解析 `thread`，只有扩展认识它的编码。结果未知时按 outbound 规则待核实，不重发；内容检查命中降为 `confirm` 进 outbox。
+
 - manifest 字段一律顶层、snake_case。
 - **动作（`actions[]`）**：`id`（**全局唯一**，跨扩展重复则争用各方都被拒绝加载，和事件键一致；动作 id 允许含冒号，如 `pr:comment`）、`level`（`auto|confirm|confirm_named|deny`）、`reversible`、`read_only`（缺省 false；登记为只读的动作不经分级直接放行，见 04 §5）。未登记的动作按 `confirm` 处理。
 - 事件目录项：`id`、`label`、`default`（`off|observe|auto`）、`strength`（`explicit|inferred`）、`followup_only`、`on_unmatched`（`filter|record`）、`feed_tier`（`notice|digest`）、`rule`、`verb`（≤6 字，仅展示）、`no_target`（`scratch`）、`collapse`（`{group, by?}`，投递时合并同类事件）。
