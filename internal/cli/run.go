@@ -234,39 +234,60 @@ func run(args []string, version string, stdout, stderr io.Writer, getenv func(st
 	return runBound(args, version, stdout, stderr, getenv, userHomeDir, CommandContext{}, nowUTC)
 }
 
-// RunWithContext 接受宿主已经核实的会话和安装上下文，不从工作标识或角色名推导权限。
+// RunWithContext 接受进程入口提供的会话身份或派工声明，普通参数不能声明角色。
 func RunWithContext(args []string, version string, stdout, stderr io.Writer, trusted CommandContext) int {
 	return runBound(args, version, stdout, stderr, os.Getenv, os.UserHomeDir, trusted, nowUTC)
 }
 
 func nowUTC() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
 
+func (i *invocation) prepare() error {
+	var err error
+	if i.binding.NeedsResolution() {
+		i.home, err = app.StateHome(i.getenv, i.userHomeDir)
+		if err != nil {
+			return err
+		}
+		i.binding, err = app.BindingForSession(i.ctx, i.home, i.binding.Session)
+		if err != nil {
+			return err
+		}
+	}
+	switch {
+	case i.spec.role == worker && (i.binding == nil || i.binding.Session.Host == "" || i.binding.Session.ID == "" || i.binding.Assignment == ""):
+		return fmt.Errorf("%w: 需要宿主提供当前 worker 会话及派工绑定", errDenied)
+	case i.spec.role != worker && i.spec.role != anySession && i.binding != nil:
+		return fmt.Errorf("%w: 执行方只能操作自己的 Work", errDenied)
+	case i.spec.path == "ext test":
+		// 一致性测试在自己的临时状态中运行，角色检查仍然适用。
+		return nil
+	}
+	if i.home == "" {
+		i.home, err = app.StateHome(i.getenv, i.userHomeDir)
+		if err != nil {
+			return err
+		}
+	}
+	group, _, _ := strings.Cut(i.spec.path, " ")
+	// watch request 和 attach 也要读取扩展声明，以核对对象类型是否可关闭。
+	if i.extensionDirs == nil && (group == "daemon" || group == "ext" || i.spec.path == "watch request" || i.spec.path == "watch attach") {
+		i.extensionDirs = app.ExtensionDirs(i.home, i.getenv("CRAFT_EXTENSIONS"))
+	}
+	return nil
+}
+
 func runBound(args []string, version string, stdout, stderr io.Writer, getenv func(string) string, userHomeDir func() (string, error), trusted CommandContext, clock engine.Clock) int {
-	binding := trusted.Session
 	asJSON := slices.Contains(args, "--json")
 	if asJSON {
 		args = slices.DeleteFunc(slices.Clone(args), func(s string) bool { return s == "--json" })
 	}
 	spec, tail, err := findCommand(args)
-	i := invocation{stderr: stderr, ctx: context.Background(), spec: spec, binding: binding, extensionDirs: trusted.ExtensionDirs, clock: clock, version: version, getenv: getenv, userHomeDir: userHomeDir}
+	i := invocation{stderr: stderr, ctx: context.Background(), spec: spec, binding: trusted.Session, extensionDirs: trusted.ExtensionDirs, clock: clock, version: version, getenv: getenv, userHomeDir: userHomeDir}
 	if err == nil {
 		err = i.parse(tail)
 	}
 	if err == nil && spec.role != local {
-		switch {
-		case spec.role == worker && (binding == nil || binding.Session.Host == "" || binding.Session.ID == "" || binding.Assignment == ""):
-			err = fmt.Errorf("%w: 需要宿主提供当前 worker 会话及派工绑定", errDenied)
-		case spec.role != worker && spec.role != anySession && binding != nil:
-			err = fmt.Errorf("%w: 执行方只能操作自己的 Work", errDenied)
-		// 一致性测试只使用用户指定的扩展和临时状态，仍须通过上面的角色检查。
-		case spec.path != "ext test":
-			i.home, err = app.StateHome(getenv, userHomeDir)
-			group, _, _ := strings.Cut(spec.path, " ")
-			// watch request / attach 要核对对象类型是否可关闭，也需要扩展声明；真实入口不会注入，要自己装配。
-			if err == nil && i.extensionDirs == nil && (group == "daemon" || group == "ext" || spec.path == "watch request" || spec.path == "watch attach") {
-				i.extensionDirs = app.ExtensionDirs(i.home, getenv("CRAFT_EXTENSIONS"))
-			}
-		}
+		err = i.prepare()
 	}
 	if err != nil {
 		return failure(stderr, asJSON, err)

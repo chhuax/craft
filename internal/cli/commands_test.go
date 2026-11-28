@@ -13,6 +13,7 @@ import (
 	"github.com/chhuax/craft/internal/alarm"
 	"github.com/chhuax/craft/internal/app"
 	"github.com/chhuax/craft/internal/engine"
+	"github.com/chhuax/craft/internal/host"
 	"github.com/chhuax/craft/internal/store"
 )
 
@@ -36,8 +37,7 @@ const testNow = "2026-01-01T00:00:00.000Z"
 
 func boundCommand(t *testing.T, home string, b *app.SessionBinding, want int, args ...string) reply {
 	t.Helper()
-	var out, diag bytes.Buffer
-	got := runBound(append(args, "--json"), "dev", &out, &diag, func(k string) string {
+	getenv := func(k string) string {
 		if k == "CRAFT_HOME" {
 			return home
 		}
@@ -49,7 +49,15 @@ func boundCommand(t *testing.T, home string, b *app.SessionBinding, want int, ar
 			return "worker"
 		}
 		return ""
-	}, func() (string, error) { return "", errors.New("禁止访问用户目录") }, CommandContext{Session: b}, func() string { return testNow })
+	}
+	return checkedCommand(t, getenv, b, want, args...)
+}
+
+func checkedCommand(t *testing.T, getenv func(string) string, b *app.SessionBinding, want int, args ...string) reply {
+	t.Helper()
+	var out, diag bytes.Buffer
+	got := runBound(append(args, "--json"), "dev", &out, &diag, getenv,
+		func() (string, error) { return "", errors.New("禁止访问用户目录") }, CommandContext{Session: b}, func() string { return testNow })
 	var r reply
 	if got != want {
 		t.Fatalf("%v 返回 %d，期望 %d，%s%s", args, got, want, &out, &diag)
@@ -139,6 +147,118 @@ func testDB(t testing.TB, home string) *store.SQLite {
 		}
 	})
 	return db
+}
+
+func sessionCommand(t *testing.T, home string, env map[string]string, want int, args ...string) reply {
+	t.Helper()
+	getenv := func(k string) string {
+		if k == "CRAFT_HOME" {
+			return home
+		}
+		return env[k]
+	}
+	return checkedCommand(t, getenv, app.SessionFromEnv(getenv), want, args...)
+}
+
+func TestWatchSessionBinding(t *testing.T) {
+	home := t.TempDir()
+	db := testDB(t, home)
+	claude := engine.Session{Host: host.ClaudeCode, ID: "current"}
+	other := engine.Session{Host: "codex", ID: "other"}
+	ended := engine.Session{Host: claude.Host, ID: "ended"}
+	work := func(id string, s engine.Session) engine.Work {
+		return engine.Work{
+			ID:        id,
+			Execution: &engine.Execution{Session: &s, Assignment: id + "-latest"},
+			Assignments: []engine.Assignment{
+				{ID: id + "-old", State: engine.AssignmentEnded},
+				{ID: id + "-latest", State: engine.AssignmentRunning},
+			},
+		}
+	}
+	closed := work("closed", ended)
+	closed.Ended = &engine.WorkEnd{By: "human", At: testNow}
+	repo := app.NewSQLiteStore(db)
+	if err := repo.Atomic(t.Context(), func(u engine.Unit) error {
+		for _, w := range []engine.Work{work("mine", claude), work("theirs", other), closed} {
+			if err := u.PutWork(w); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	otherEnv := func() map[string]string {
+		return host.BindingEnv(host.Session(other), map[string]string{host.EnvWork: "theirs", host.EnvAssignment: "theirs-latest"})
+	}
+	for _, name := range []string{"native", "stale"} {
+		t.Run(name, func(t *testing.T) {
+			env := map[string]string{}
+			if name == "stale" {
+				env = otherEnv()
+			}
+			env[host.EnvClaudeSessionID] = claude.ID
+			report := sessionCommand(t, home, env, 0, "watch", "report", "progress", "--summary", name)
+			if got := string(report.Payload["workId"]); got != `"mine"` {
+				t.Fatalf("report 写入 %s，期望 mine", got)
+			}
+			facts := sessionCommand(t, home, env, 0, "watch", "read", "mine")
+			var saved engine.Report
+			if err := json.Unmarshal(facts.Payload["report"], &saved); err != nil || saved.Summary != name || string(facts.Payload["assignmentId"]) != `"mine-latest"` {
+				t.Fatalf("最新派工未收到回报: %v %v", saved, err)
+			}
+			if facts := sessionCommand(t, home, otherEnv(), 0, "watch", "read", "theirs"); facts.Payload["report"] != nil {
+				t.Fatal("另一个 Work 收到了回报")
+			}
+			sessionCommand(t, home, env, 4, "watch", "read", "theirs")
+			sessionCommand(t, home, env, 4, "watch", "list")
+			sessionCommand(t, home, env, 0, "watch", "turn-ended")
+		})
+	}
+	for _, id := range []string{"unregistered", ended.ID} {
+		t.Run(id, func(t *testing.T) {
+			env := otherEnv()
+			env[host.EnvClaudeSessionID] = id
+			sessionCommand(t, home, env, 0, "watch", "list")
+			sessionCommand(t, home, env, 4, "watch", "report", "progress", "--summary", "x")
+		})
+	}
+	t.Run("person", func(t *testing.T) {
+		sessionCommand(t, home, nil, 0, "watch", "list")
+		sessionCommand(t, home, nil, 4, "watch", "read", "mine")
+	})
+	t.Run("codex", func(t *testing.T) {
+		env := otherEnv()
+		env[host.EnvCodexThreadID] = other.ID
+		sessionCommand(t, home, env, 0, "watch", "read", "theirs")
+		env[host.EnvClaudeSessionID] = claude.ID
+		delete(env, host.EnvSessionID)
+		sessionCommand(t, home, env, 0, "watch", "read", "theirs")
+		sessionCommand(t, home, env, 4, "watch", "read", "mine")
+	})
+}
+
+func TestSessionLookupStorage(t *testing.T) {
+	home := t.TempDir()
+	env := map[string]string{host.EnvClaudeSessionID: "session", host.EnvWork: "stale"}
+	path := filepath.Join(home, "craft.db")
+	t.Run("missing", func(t *testing.T) {
+		sessionCommand(t, home, env, 0, "watch", "list")
+		sessionCommand(t, home, env, 4, "watch", "turn-ended")
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("角色查询创建了状态库: %v", err)
+		}
+	})
+	if err := os.WriteFile(path, []byte("无效的状态库"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessionCommand(t, home, env, 0, "version")
+	sessionCommand(t, home, nil, 4, "watch", "turn-ended")
+	codex := host.BindingEnv(host.Session{Host: "codex"}, map[string]string{host.EnvWork: "work", host.EnvAssignment: "latest"})
+	codex[host.EnvCodexThreadID] = "thread"
+	sessionCommand(t, home, codex, 4, "watch", "list")
+	sessionCommand(t, home, env, 1, "watch", "turn-ended")
 }
 
 func TestWorkerAuthorityAndHumanCommands(t *testing.T) {
