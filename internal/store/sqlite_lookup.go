@@ -30,7 +30,10 @@ var lookups = map[string]string{
 	"workPage":        "SELECT key,value FROM watch_work WHERE key>? ORDER BY key LIMIT ?",
 	"openPage":        "SELECT key,value FROM watch_work WHERE ended IS NULL AND key>? ORDER BY key LIMIT ?",
 	"threadPage":      threadPage(false), "openThreadPage": threadPage(true),
-	"attentionWorks":    `SELECT key,value FROM watch_work INDEXED BY work_attention WHERE ended IS NULL AND (value->'$.delivery' IS NOT NULL OR value->'$.attention' IS NOT NULL OR value->'$.assignments[#-1].report' IS NOT NULL)`,
+	"attentionWorks": `SELECT key,value FROM watch_work INDEXED BY work_attention WHERE ended IS NULL AND (value->'$.delivery' IS NOT NULL OR value->'$.attention' IS NOT NULL OR value->'$.assignments[#-1].report' IS NOT NULL)`,
+	"replyFailures": `SELECT value->>'$.ref.message',json_object(
+		'at',value->>'$.at','ref',json_object('work',value->>'$.ref.work','attention',value->>'$.ref.message'),
+		'detail',value->>'$.data.detail') FROM watch_kv WHERE key>='reply.failed.' AND key<'reply.failed/'`,
 	"warningKeys":       `SELECT DISTINCT thread_key,NULL FROM watch_decision INDEXED BY decision_warning WHERE thread_key>'' AND value->>'$.kind'='unavailable' AND coalesce(value->>'$.dismissed',0)=0`,
 	"sessionWorks":      `SELECT key,value FROM watch_work WHERE value->>'$.execution.session.host'=? AND value->>'$.execution.session.id'=? ORDER BY ended LIMIT 2`,
 	"decisionByKind":    `SELECT key,value FROM watch_decision WHERE value->>'$.kind'=? AND key>? ORDER BY key LIMIT ?`,

@@ -74,6 +74,16 @@ func (s sqliteOutbox) Save(ctx context.Context, r *outbound.Result, rate outboun
 		if err != nil {
 			return err
 		}
+		// 问题可能在扩展预览期间被撤回，取得发送或确认名额前须在同一写事务重查。
+		if r.State == outbound.Pending || r.State == outbound.Confirmed || r.State == outbound.Executing {
+			var status engine.ReplyStatus
+			if err := (engineReader{tx.SQLiteReader}).get("watch_reply_status", r.ID, &status); err != nil {
+				return err
+			}
+			if status == engine.ReplyDropped {
+				return fmt.Errorf("回复 %q 已撤回: %w", r.ID, outbound.ErrDenied)
+			}
+		}
 		from = current.State
 		if err := current.PrepareTransition(r, rate, clock()); err != nil {
 			return err

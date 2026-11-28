@@ -43,6 +43,15 @@ func runTestExtension() {
 		switch method {
 		case "initialize":
 			return protocol.InitializeResult{OK: true, Capabilities: json.RawMessage(`{}`)}, nil
+		case "action/execute":
+			var p protocol.ActionExecuteParams
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, err
+			}
+			if p.Preview {
+				return map[string]string{"summary": "发表评论"}, nil
+			}
+			return map[string]any{"key": p.IdempotencyKey, "action": p.Action, "params": p.Params, "count": calls.Add(1)}, nil
 		case "alarm/run":
 			var p protocol.AlarmRunParams
 			if err := json.Unmarshal(raw, &p); err != nil {

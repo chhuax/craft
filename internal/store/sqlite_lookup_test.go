@@ -18,6 +18,7 @@ func TestLookupPlans(t *testing.T) {
 		"workPage": {"sqlite_autoindex_watch_work_1"}, "openPage": {"work_open_key"},
 		"threadPage":     {"PRIMARY KEY (thread_key=? AND work_id>?)", "sqlite_autoindex_watch_work_1", "work_origin_key"},
 		"openThreadPage": {"PRIMARY KEY (thread_key=? AND work_id>?)", "work_open_key", "work_origin_key"},
+		"replyFailures":  {"key>? AND key<?"},
 		"attentionWorks": {"work_attention"}, "warningKeys": {"decision_warning"},
 		"decisionByKind": {"decision_kind"}, "decisionBySource": {"decision_source"}, "observedDecisions": {"decision_observed"},
 		"sessionWorks": {"work_session"}, "decisionPage": {"sqlite_autoindex_watch_decision_1"},

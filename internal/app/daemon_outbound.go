@@ -6,6 +6,7 @@ import (
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -112,8 +113,10 @@ func (d *Daemon) startOutbound(ctx context.Context, exts []exthost.Extension) er
 		return err
 	}
 	hosts := actionHosts{owners: map[string]string{}, hosts: d.hosts}
+	replyActions := map[string]string{}
 	var actions []outbound.Action
 	for _, e := range exts {
+		maps.Copy(replyActions, e.Manifest.Channels)
 		for _, a := range e.Manifest.Actions {
 			hosts.owners[a.ID] = e.Manifest.ID
 			actions = append(actions, outbound.Action{ID: a.ID, Extension: e.Manifest.ID, Level: outbound.Level(a.Level), Reversible: a.Reversible, ReadOnly: a.ReadOnly})
@@ -127,11 +130,20 @@ func (d *Daemon) startOutbound(ctx context.Context, exts []exthost.Extension) er
 	if err != nil {
 		return fmt.Errorf("装载外发登记与 %s: %w", path, err)
 	}
+	d.replies = replyHandler{repo: d.runtime.repo, commands: d.runtime.Commands, box: d.outbound, actions: replyActions, health: d.health}
 	return d.loadOutboxCounts(ctx)
 }
 
 func (d *Daemon) loadOutboxCounts(ctx context.Context) error {
 	if err := d.db.View(ctx, func(r store.SQLiteReader) error {
+		// 终态 effect 已消费，进程重启时从持久失败记录恢复健康项。
+		failures, err := (CommandReader{&r}).replyFailures()
+		if err != nil {
+			return err
+		}
+		for _, f := range failures {
+			d.health.report("reply", f.Ref.Attention, HealthEntry{"error", f.Detail})
+		}
 		rows, err := r.Lookup("outboxCounts")
 		if err != nil {
 			return err

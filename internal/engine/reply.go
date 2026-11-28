@@ -255,3 +255,28 @@ func readyToSend(w *Work, id string) bool {
 	}
 	return false
 }
+
+// FinishReply 记录渠道接手后的结果。确认、核实或终态已登记时，旧 effect 的重放不能改回旧状态。
+func (e *Engine) FinishReply(ctx context.Context, m OutboundMessage, status ReplyStatus, detail string) (bool, error) {
+	changed := false
+	err := e.cfg.Store.Atomic(ctx, func(u Unit) error {
+		before, err := u.GetReplyStatus(m.ID)
+		if err != nil || before != ReplyPending {
+			return err
+		}
+		if err := u.PutReplyStatus(m.ID, status); err != nil {
+			return err
+		}
+		fields := map[string]any{"kind": m.Kind}
+		if detail != "" {
+			fields["detail"] = detail
+		}
+		if status == ReplyFailed {
+			// 渠道未声明时没有 outbox 行，仍保留待查的原始目的地和正文。
+			fields["message"] = m
+		}
+		changed = true
+		return emitEvent(u, "reply."+string(status), e.cfg.Clock(), map[string]string{"work": m.WorkID, "message": m.ID}, fields)
+	})
+	return changed && err == nil, err
+}

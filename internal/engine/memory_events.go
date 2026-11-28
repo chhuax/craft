@@ -94,7 +94,7 @@ func (r *memoryView) GetReplyStatus(id string) (ReplyStatus, error) {
 }
 func (u *memoryUnit) PutReplyStatus(id string, status ReplyStatus) error {
 	switch status {
-	case ReplyPending, ReplySent, ReplyDropped, ReplyConfirm:
+	case ReplyPending, ReplySent, ReplyDropped, ReplyConfirm, ReplyFailed, ReplyUnknown:
 		u.replyStates = u.replyStates.set(u.mark, id, &memoryRow{lookup: string(status)})
 		return nil
 	default:

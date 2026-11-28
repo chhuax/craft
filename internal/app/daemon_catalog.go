@@ -100,19 +100,6 @@ func (d *Daemon) fingerprint() string {
 	return exthost.Fingerprint(d.cfg.Version, manifests)
 }
 
-func (d *Daemon) observeEffects(ctx context.Context) error {
-	var stats store.EffectStats
-	err := d.db.View(ctx, func(r store.SQLiteReader) error {
-		var err error
-		stats, err = r.EffectStats("reply")
-		return err
-	})
-	if err == nil {
-		d.health.effect("reply", HealthState{EffectStats: stats, Status: "paused"})
-	}
-	return err
-}
-
 func (d *Daemon) fingerprintChanged(initial string) bool {
 	current := d.fingerprint()
 	return current != "" && current != initial
