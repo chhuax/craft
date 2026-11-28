@@ -38,6 +38,9 @@ func (s *SQLite) View(ctx context.Context, fn func(SQLiteReader) error) error {
 		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 			return fmt.Errorf("建立 SQLite 读快照: %w", err)
 		}
+		if version != 1 {
+			return fmt.Errorf("不支持读取数据库版本 %d", version)
+		}
 		return fn(SQLiteReader{ctx, tx})
 	})
 }

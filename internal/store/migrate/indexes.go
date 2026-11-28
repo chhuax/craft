@@ -7,8 +7,21 @@ import (
 
 // 数组的每个元素都可能被反查。只在写入该文档时展开数组，使读者按键直达命中项。
 // 索引和文档由同一条语句维护，PutMany、保存点和直接导入文档也具备相同语义。
+const workAttention = `ended IS NULL AND (value->'$.delivery' IS NOT NULL OR value->'$.attention' IS NOT NULL OR value->'$.assignments[#-1].report' IS NOT NULL)`
+const decisionWarning = `value->>'$.kind'='unavailable' AND coalesce(value->>'$.dismissed',0)=0`
+
 func createIndexes(tx *sql.Tx) error {
 	for _, ddl := range []string{
+		"CREATE TABLE document_count (name TEXT PRIMARY KEY,total INTEGER NOT NULL) WITHOUT ROWID",
+		"INSERT INTO document_count VALUES('watch_thread',0),('watch_work',0)",
+		"CREATE INDEX work_open_key ON watch_work(ended,key) WHERE ended IS NULL",
+		"CREATE INDEX work_origin_key ON watch_work(origin_thread,key)",
+		"CREATE INDEX work_session ON watch_work(value->>'$.execution.session.host',value->>'$.execution.session.id',ended)",
+		"CREATE INDEX work_attention ON watch_work(ended,key) WHERE " + workAttention,
+		"CREATE INDEX decision_warning ON watch_decision(thread_key) WHERE " + decisionWarning,
+		"CREATE INDEX decision_kind ON watch_decision(value->>'$.kind',key)",
+		"CREATE INDEX decision_source ON watch_decision(substr(thread_key,1,instr(thread_key,':')-1),key)",
+		"CREATE INDEX decision_observed ON watch_decision(key) WHERE value->>'$.audit.would_accept'=1",
 		"CREATE INDEX outbox_state ON outbox(state,key)",
 		"CREATE INDEX outbox_auto_at ON outbox(auto_at) WHERE auto_at IS NOT NULL",
 		"CREATE INDEX thread_pending ON watch_thread(closed,ordinal) WHERE closed IS NULL AND ready=1",
@@ -46,6 +59,15 @@ func createIndexes(tx *sql.Tx) error {
 		}
 	}
 
+	// 精确总数与原文同事务更新，读取总览时无需遍历历史索引。
+	for _, table := range []string{"watch_thread", "watch_work"} {
+		for _, change := range []struct{ event, delta string }{{"INSERT", "+1"}, {"DELETE", "-1"}} {
+			q := fmt.Sprintf("CREATE TRIGGER %s_count_%s AFTER %s ON %s BEGIN UPDATE document_count SET total=total%s WHERE name='%s'; END", table, change.event, change.event, table, change.delta, table)
+			if _, err := tx.Exec(q); err != nil {
+				return fmt.Errorf("创建 %s 计数: %w", table, err)
+			}
+		}
+	}
 	return createProjectionTriggers(tx)
 }
 

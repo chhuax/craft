@@ -13,6 +13,13 @@ func TestLookupPlans(t *testing.T) {
 	const workKey = "INDEX sqlite_autoindex_watch_work_1 (key=?)"
 	const inputKey = "PRIMARY KEY (work_key=? AND input_id=?)"
 	expected := map[string][]string{
+		"totals":   {"PRIMARY KEY (name=?)"},
+		"workPage": {"sqlite_autoindex_watch_work_1"}, "openPage": {"work_open_key"},
+		"threadPage":     {"PRIMARY KEY (thread_key=? AND work_id>?)", "sqlite_autoindex_watch_work_1", "work_origin_key"},
+		"openThreadPage": {"PRIMARY KEY (thread_key=? AND work_id>?)", "work_open_key", "work_origin_key"},
+		"attentionWorks": {"work_attention"}, "warningKeys": {"decision_warning"},
+		"decisionByKind": {"decision_kind"}, "decisionBySource": {"decision_source"}, "observedDecisions": {"decision_observed"},
+		"sessionWorks": {"work_session"}, "decisionPage": {"sqlite_autoindex_watch_decision_1"},
 		"outboxState": {"INDEX outbox_state"}, "autoWindow": {"INDEX outbox_auto_at"},
 		"pending": {"INDEX thread_pending"}, "evaluating": {"INDEX thread_eval"}, "eval": {"INDEX thread_eval"},
 		"open": {"INDEX watch_work_active"}, "recent": {"INDEX work_recent"}, "origin": {"INDEX work_origin"},

@@ -37,19 +37,10 @@ func WithClock(now func() time.Time) Option {
 // OpenSQLite 打开或创建本地文件并在返回前完成迁移。WAL 依赖本机锁与共享内存，
 // 不支持网络盘。调用方负责 Close，logger 为 nil 时使用 slog 默认日志。
 func OpenSQLite(ctx context.Context, path string, logger *slog.Logger, opts ...Option) (_ *SQLite, err error) {
-	abs, err := filepath.Abs(path)
+	file, params, err := sqliteURI(path)
 	if err != nil {
-		return nil, fmt.Errorf("解析数据库路径 %q: %w", path, err)
+		return nil, err
 	}
-	uriPath := filepath.ToSlash(abs)
-	// Windows 盘符前也需要斜杠，否则 file://C:/... 会把盘符解释成主机名。
-	if !strings.HasPrefix(uriPath, "/") {
-		uriPath = "/" + uriPath
-	}
-	file := url.URL{Scheme: "file", Path: uriPath}
-	params := url.Values{"_pragma": {
-		"busy_timeout(5000)", "synchronous(FULL)", "foreign_keys(ON)",
-	}}
 	params.Set("_txlock", "immediate")
 	file.RawQuery = params.Encode()
 	writeDB, err := sql.Open("sqlite", file.String())
@@ -131,4 +122,37 @@ func (s *SQLite) withWriter(ctx context.Context, fn func() error) error {
 	case <-ctx.Done():
 		return fmt.Errorf("等候 SQLite 写连接: %w", ctx.Err())
 	}
+}
+
+func sqliteURI(path string) (url.URL, url.Values, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return url.URL{}, nil, fmt.Errorf("解析数据库路径 %q: %w", path, err)
+	}
+	uriPath := filepath.ToSlash(abs)
+	// Windows 盘符前也需要斜杠，否则 file://C:/... 会把盘符解释成主机名。
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	file := url.URL{Scheme: "file", Path: uriPath}
+	params := url.Values{"_pragma": {
+		"busy_timeout(5000)", "synchronous(FULL)", "foreign_keys(ON)",
+	}}
+	return file, params, nil
+}
+
+// ViewFile 在已有状态库上打开一次只读快照。短进程不获取写锁，也不负责迁移。
+func ViewFile(ctx context.Context, path string, fn func(SQLiteReader) error) (err error) {
+	file, params, err := sqliteURI(path)
+	if err != nil {
+		return err
+	}
+	params.Set("mode", "ro")
+	file.RawQuery = params.Encode()
+	db, err := sql.Open("sqlite", file.String())
+	if err != nil {
+		return fmt.Errorf("打开只读库 %q: %w", path, err)
+	}
+	defer func() { err = errors.Join(err, db.Close()) }()
+	return (&SQLite{reader: db}).View(ctx, fn)
 }

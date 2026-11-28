@@ -8,10 +8,33 @@ import (
 	"github.com/chhuax/craft/internal/store/migrate"
 )
 
+// 订阅随退订而消失，按对象分页还须合并起源索引，保留已经结束的工作。
+func threadPage(open bool) string {
+	active := ""
+	if open {
+		active = " AND w.ended IS NULL"
+	}
+	return `SELECT s.work_id,w.value FROM watch_subscription s CROSS JOIN watch_work w ON w.key=s.work_id
+		WHERE s.thread_key=?1 AND s.work_id>?2 AND w.origin_thread IS NOT ?1` + active + `
+		UNION ALL SELECT w.key,w.value FROM watch_work w WHERE origin_thread=?1 AND w.key>?2` + active + `
+		ORDER BY 1 LIMIT ?3`
+}
+
 // 所有命名查询都返回键和可选 JSON 投影。只取标识的反查不装载聚合，
 // 最近 N 项的排除集合只展开一次，不占用数量随输入增长的绑定参数。
 var lookups = map[string]string{
-	"outboxState": "SELECT key,value FROM outbox WHERE state=? ORDER BY key",
+	"totals":     "SELECT name,total FROM document_count WHERE name IN ('watch_thread','watch_work')",
+	"workPage":   "SELECT key,value FROM watch_work WHERE key>? ORDER BY key LIMIT ?",
+	"openPage":   "SELECT key,value FROM watch_work WHERE ended IS NULL AND key>? ORDER BY key LIMIT ?",
+	"threadPage": threadPage(false), "openThreadPage": threadPage(true),
+	"attentionWorks":    `SELECT key,value FROM watch_work INDEXED BY work_attention WHERE ended IS NULL AND (value->'$.delivery' IS NOT NULL OR value->'$.attention' IS NOT NULL OR value->'$.assignments[#-1].report' IS NOT NULL)`,
+	"warningKeys":       `SELECT DISTINCT thread_key,NULL FROM watch_decision INDEXED BY decision_warning WHERE thread_key>'' AND value->>'$.kind'='unavailable' AND coalesce(value->>'$.dismissed',0)=0`,
+	"sessionWorks":      `SELECT key,value FROM watch_work WHERE value->>'$.execution.session.host'=? AND value->>'$.execution.session.id'=? ORDER BY ended LIMIT 2`,
+	"decisionByKind":    `SELECT key,value FROM watch_decision WHERE value->>'$.kind'=? AND key>? ORDER BY key LIMIT ?`,
+	"decisionBySource":  `SELECT key,value FROM watch_decision WHERE substr(thread_key,1,instr(thread_key,':')-1)=? AND key>? AND (?='' OR value->>'$.kind'=?) ORDER BY key LIMIT ?`,
+	"observedDecisions": `SELECT key,value FROM watch_decision INDEXED BY decision_observed WHERE value->>'$.audit.would_accept'=1 AND key>? AND (?='' OR value->>'$.kind'=?) AND (?='' OR substr(thread_key,1,instr(thread_key,':')-1)=?) ORDER BY key LIMIT ?`,
+	"decisionPage":      "SELECT key,value FROM watch_decision WHERE key>? ORDER BY key LIMIT ?",
+	"outboxState":       "SELECT key,value FROM outbox WHERE state=? ORDER BY key",
 	// 只数到上限，窗口内历史记录再多也不影响准入成本。
 	"autoWindow": "SELECT key,NULL FROM outbox WHERE auto_at>? AND auto_at<=? LIMIT 1 OFFSET ?",
 	"pending":    "SELECT key,value FROM watch_thread WHERE closed IS NULL AND ready=1 ORDER BY ordinal",
