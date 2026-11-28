@@ -69,7 +69,7 @@ func TestDoctor(t *testing.T) {
 		}
 	}
 	detail := checks["databaseInfo"].Detail
-	for _, value := range []string{"schema=1", "journal_mode=wal", "SQLite=3."} {
+	for _, value := range []string{"schema=2", "journal_mode=wal", "SQLite=3."} {
 		if !strings.Contains(detail, value) {
 			t.Errorf("库信息 %q 缺少 %q", detail, value)
 		}

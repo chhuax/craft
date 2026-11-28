@@ -113,10 +113,10 @@ func TestSQLiteVersion(t *testing.T) {
 	}
 }
 
-func TestSchemaV1(t *testing.T) {
+func TestSchema(t *testing.T) {
 	s := openTestDB(t, filepath.Join(t.TempDir(), "schema.db"))
 	var version int
-	if err := s.reader.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 1 {
+	if err := s.reader.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
 		t.Fatalf("user_version = %d, %v", version, err)
 	}
 	for table, want := range map[string][]string{
@@ -166,7 +166,7 @@ func TestNewerSchemaRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeTest(t, db)
-	if _, err := db.Exec("PRAGMA user_version = 2"); err != nil {
+	if _, err := db.Exec("PRAGMA user_version = 3"); err != nil {
 		t.Fatal(err)
 	}
 	other, err := OpenSQLite(t.Context(), path, nil)
@@ -178,11 +178,11 @@ func TestNewerSchemaRefused(t *testing.T) {
 		})
 		t.Fatal("打开了较新版本的库")
 	}
-	if !strings.Contains(err.Error(), "2") || !strings.Contains(err.Error(), "1") {
+	if !strings.Contains(err.Error(), "2") || !strings.Contains(err.Error(), "3") {
 		t.Fatalf("错误缺少库版本或程序版本：%v", err)
 	}
 	var version int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 3 {
 		t.Fatalf("拒绝打开后 user_version = %d, %v", version, err)
 	}
 	var mode string

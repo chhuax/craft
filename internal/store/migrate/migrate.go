@@ -14,7 +14,7 @@ type Migration struct {
 	Up      func(*sql.Tx) error
 }
 
-var migrations = []Migration{{Version: 1, Up: createV1}}
+var migrations = []Migration{{Version: 1, Up: createV1}, {Version: 2, Up: createPruneIndexes}}
 
 const readVersion = "PRAGMA user_version"
 
