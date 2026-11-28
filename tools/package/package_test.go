@@ -61,6 +61,28 @@ func TestUniversalPackage(t *testing.T) {
 	first, report := makeTestPackage(t)
 	second, _ := makeTestPackage(t)
 	files := strings.Fields(`.claude-plugin/plugin.json .codex-plugin/plugin.json LICENSE NOTICE README.md VERSION bin/craft bin/craft.exe bin/darwin-amd64/craft bin/darwin-arm64/craft bin/linux-amd64/craft bin/linux-arm64/craft hooks/hooks.json hooks/codex-hooks.json skills/craft/SKILL.md skills/craft-worker/SKILL.md`)
+	// 入口链接到参考页、示例与模板。两份宿主清单指向的公共目录必须收齐整个 skill。
+	err := fs.WalkDir(os.DirFS("../../hosts"), "skills/method", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		files = append(files, name)
+		body, err := os.ReadFile(filepath.Join("../../hosts", name))
+		if err != nil {
+			return err
+		}
+		packed, err := os.ReadFile(filepath.Join(first, name))
+		if err != nil {
+			return err
+		}
+		if sha256.Sum256(body) != sha256.Sum256(packed) {
+			t.Errorf("包中 %s 与源文件不一致", name)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	slices.Sort(files)
 	for _, key := range append(slices.Clone(allTargets), "总量", "已跳过", "claude plugin validate") {
 		if !strings.Contains(report, key) {
@@ -117,6 +139,7 @@ func TestPackageValidation(t *testing.T) {
 	packageEnv(t)
 	out, _ := makeTestPackage(t)
 	for _, tc := range []struct{ name, path, from, to string }{
+		{"方法手册缺失", "skills/method/SKILL.md", "", ""},
 		{"文件缺失", "skills/craft/SKILL.md", "", ""},
 		{"清单语法", ".claude-plugin/plugin.json", "{", "{!"},
 		{"hook语法", "hooks/hooks.json", "{", "["},

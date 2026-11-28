@@ -9,6 +9,8 @@ Work 是一次有目标的工作，可以接收多条事件，也可以经历多
 
 Claude Code 的 Bash 可以直接运行以下命令。Codex 把示例中的 `craft` 换成 SessionStart 给出的可执行文件绝对路径。若开场没有路径，从本 skill 所在目录向上两级到插件根，使用 `bin/craft` 或 Windows 的 `bin\craft.exe`。路径含空格时加引号，PowerShell 用调用运算符 `&`。
 
+接到模糊的需求或缺陷，要写需求与方案、验证变更或准备交付说明时，使用 [method 手册](../method/SKILL.md)。
+
 ## 查状态
 
 - `craft watch status --json` 给出 Thread（被跟进的对象）、Work 和待办的总数。
