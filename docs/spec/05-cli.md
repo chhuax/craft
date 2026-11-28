@@ -81,7 +81,7 @@ craft outbox list|show|confirm|withdraw
 
 # 扩展
 craft ext list|enable|disable|logs <id>
-craft ext test <path>                       # 协议一致性测试（用 fixture）
+craft ext test <path> [--fixtures DIR]     # 协议一致性测试（HTTP 重放 fixture，见 03 §5–§6）
 
 # 凭据
 craft cred list|login <provider>|logout <provider>
