@@ -14,7 +14,7 @@ func TestNormalizedHash(t *testing.T) {
 		{"正文 - [x]", "正文 - [x]"}, {"a \t\n\nb\r", "a \t\n\nb\r"}, {"\xff\xfe", "\xff\xfe"}, {"", ""},
 	} {
 		want := fmt.Sprintf("%x", sha256.Sum256([]byte(tc.normal)))
-		if got := normalizedHash(tc.raw); got != want {
+		if got := NormalizedHash(tc.raw); got != want {
 			t.Errorf("%q: %s", tc.raw, got)
 		}
 	}
@@ -28,7 +28,7 @@ func BenchmarkNormalizedHash(b *testing.B) {
 			b.SetBytes(int64(len(data)))
 			b.ReportAllocs()
 			for b.Loop() {
-				normalizedHash(data)
+				NormalizedHash(data)
 			}
 		})
 	}

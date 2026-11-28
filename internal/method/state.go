@@ -15,6 +15,7 @@ import (
 
 // StateStore 在同一变更名下存放确认、任务清单及证据日志，读取不存在的记录返回空值。
 type StateStore interface {
+	Prepare() error
 	Load(change string) (*Confirmation, error)
 	Save(change string, c Confirmation) error
 	LoadTasks(change string) (string, error)
@@ -97,6 +98,9 @@ func (s *fileStore) withDir(create bool, use func(*os.Root) error) (err error) {
 	defer closeResource(dir, &err)
 	return use(dir)
 }
+
+// Prepare 在交给人编写任务清单前建立状态目录，沿用端口自己的忽略规则。
+func (s *fileStore) Prepare() error { return s.withDir(true, ensureIgnored) }
 
 func (s *fileStore) Load(change string) (*Confirmation, error) {
 	if !safeComponent(change) {

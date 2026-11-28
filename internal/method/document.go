@@ -10,9 +10,10 @@ import (
 
 // Gap 标识文档中的一处缺口。Line 从 1 起算，缺文件或缺节时定位到文件开头。
 type Gap struct {
-	Rule, Path string
-	Line       int
-	Message    string
+	Rule    string `json:"rule"`
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Message string `json:"message"`
 }
 
 // Section 保留二级标题、原行号与去注释后的正文。
@@ -99,7 +100,7 @@ func Parse(path, text string) Document {
 		d.issue("F1 front", 1, "文档含无效的 UTF-8 字节")
 		return d
 	}
-	d.hash = normalizedHash(text)
+	d.hash = NormalizedHash(text)
 	text = strings.ReplaceAll(strings.ReplaceAll(strings.TrimLeft(text, "\ufeff"), "\r\n", "\n"), "\r", "\n")
 	lines := strings.Split(text, "\n")
 	d.LineCount = len(lines)

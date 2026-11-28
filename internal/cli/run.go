@@ -52,6 +52,7 @@ type invocation struct {
 	spec          commandSpec
 	args          []string
 	flags         map[string]string
+	listFlags     map[string][]string
 	home          string
 	binding       *app.SessionBinding
 	clock         engine.Clock
@@ -61,7 +62,7 @@ type invocation struct {
 }
 
 func commands() []commandSpec {
-	return []commandSpec{
+	return append([]commandSpec{
 		{"version", "", "", local, versionResult},
 		{"doctor", "", "", local, doctorResult},
 		{"hook session-start", "", "--host HOST", local, sessionStart},
@@ -108,7 +109,7 @@ func commands() []commandSpec {
 		{"watch mark-unrelated", "<thread-key>", "", worker, markUnrelated},
 		{"policy show", "", "", reader, showPolicy},
 		{"policy set", "<settings-json>", "", settings, setPolicy},
-	}
+	}, methodCommands()...)
 }
 
 func helpResult(*invocation) (result, error) {
@@ -163,7 +164,7 @@ func invalid(format string, values ...any) error {
 
 // 选项清单同时用于帮助和解析，方括号标记可选项，大写占位符标记取值选项。
 func (i *invocation) parse(args []string) error {
-	type option struct{ required, value bool }
+	type option struct{ required, value, list bool }
 	known := map[string]option{}
 	words := strings.Fields(i.spec.options)
 	for n := 0; n < len(words); n++ {
@@ -172,6 +173,7 @@ func (i *invocation) parse(args []string) error {
 		name := strings.Trim(word, "[]")
 		if n+1 < len(words) && !strings.Contains(words[n+1], "--") {
 			o.value = true
+			o.list = strings.HasSuffix(strings.TrimRight(words[n+1], "]"), "...")
 			n++
 		}
 		known[name] = o
@@ -189,7 +191,7 @@ func (i *invocation) parse(args []string) error {
 		name, v, inline := strings.Cut(token, "=")
 		o, ok := known[name]
 		_, seen := i.flags[name]
-		if !ok || seen {
+		if !ok || seen && !o.list {
 			if strings.HasPrefix(i.spec.path, "cred ") {
 				return invalid("未知或重复的凭据参数")
 			}
@@ -210,6 +212,16 @@ func (i *invocation) parse(args []string) error {
 			}
 		} else if inline {
 			return invalid("%s 不接受值", name)
+		}
+		if o.list {
+			if i.listFlags == nil {
+				i.listFlags = make(map[string][]string)
+			}
+			i.listFlags[name] = append(i.listFlags[name], v)
+			for n+1 < len(args) && !strings.HasPrefix(args[n+1], "-") {
+				n++
+				i.listFlags[name] = append(i.listFlags[name], args[n])
+			}
 		}
 		i.flags[name] = v
 	}
@@ -362,6 +374,9 @@ func failure(w io.Writer, asJSON bool, err error) int {
 		}
 	}
 	var publicDetail any = detail
+	if refused, ok := errors.AsType[*methodRefusal](err); ok {
+		code, exit, publicDetail = "refused", 5, refused.detail
+	}
 	message = clipText(message)
 	if remote, ok := errors.AsType[*protocol.Error](err); ok && remote.Data != nil {
 		publicDetail = *remote.Data

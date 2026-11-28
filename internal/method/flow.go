@@ -2,7 +2,8 @@ package method
 
 // Stage 是展示用的进度节点。State 取 pending、done、skipped 或 stale。
 type Stage struct {
-	Name, State string
+	Name  string `json:"name"`
+	State string `json:"state"`
 }
 
 // Flow 按工作类型、当前产物和确认记录现算文档进度。后面的节点可以独立完成，结果只供展示。

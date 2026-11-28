@@ -41,3 +41,23 @@ func SuggestTier(f RiskFacts) (string, []string) {
 	}
 	return tier, reasons
 }
+
+// DocumentRisk 从契约读取场景数、规则数与已声明的增量，删除项和配置项也按其种类计入。
+func DocumentRisk(req, design Document) (RiskFacts, error) {
+	facts := RiskFacts{Behaviors: len(req.Scenarios), Rules: req.RuleCount, CrossRepo: req.value("type") == "cross-repo"}
+	deltas, err := interfaceDeltas(design)
+	if err != nil {
+		return facts, err
+	}
+	for _, d := range deltas {
+		switch d.file.Kind {
+		case "api":
+			facts.Interface = true
+		case "table":
+			facts.Schema = true
+		case "config":
+			facts.Config = true
+		}
+	}
+	return facts, nil
+}

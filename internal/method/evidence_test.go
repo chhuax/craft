@@ -99,7 +99,7 @@ func TestEvidenceChain(t *testing.T) {
 		t.Fatal("状态记录改变快照")
 	}
 	failed := 1
-	for _, run := range []ClosingRun{{"检查", &failed, snap, snap}, {"检查", nil, snap, snap}, {"检查", &zero, another, snap}} {
+	for _, run := range []ClosingRun{{Command: "检查", Exit: &failed, Before: snap, After: snap}, {Command: "检查", Before: snap, After: snap}, {Command: "检查", Exit: &zero, Before: another, After: snap}} {
 		record(run)
 		if s := state(snap); s.Closing == "pass" || s.Review == "pass" || review(reviewer()) == nil {
 			t.Fatal(s)
