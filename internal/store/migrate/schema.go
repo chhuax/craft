@@ -21,21 +21,29 @@ type IndexSpec struct {
 type CollectionSpec struct {
 	Name      string
 	Table     string
+	ordered   bool
+	columns   string
 	Generated []GeneratedColumn
 	Indexes   []IndexSpec
 }
 
 var collections = []CollectionSpec{
-	{Name: "watch_trigger", Table: "watch_trigger"},
+	{Name: "watch_trigger", Table: "watch_trigger", columns: `, primary_thread TEXT AS (
+      json_extract(value,'$.threads[0].source') || ':' || json_extract(value,'$.threads[0].kind') || ':' || json_extract(value,'$.threads[0].id'))`},
 	{Name: "watch_disposition", Table: "watch_disposition"},
-	{Name: "watch_thread", Table: "watch_thread",
+	{Name: "watch_thread", Table: "watch_thread", ordered: true, columns: `,
+      ready INTEGER AS (json_type(value,'$.evaluating') IS NULL AND json_array_length(value,'$.pending') > 0),
+      eval_id TEXT AS (json_extract(value,'$.evaluating.id'))`,
 		Generated: []GeneratedColumn{{Field: "closed"}},
 		Indexes:   []IndexSpec{{Name: "Active", Missing: "closed"}}},
-	{Name: "watch_work", Table: "watch_work",
+	{Name: "watch_work", Table: "watch_work", ordered: true, columns: `,
+      created TEXT AS (json_extract(value,'$.createdAt')),
+      origin_id TEXT AS (nullif(json_extract(value,'$.origin.triggerId'),'')), origin_thread TEXT`,
 		Generated: []GeneratedColumn{{Field: "ended"}},
 		Indexes:   []IndexSpec{{Name: "Active", Missing: "ended"}}},
-	{Name: "watch_decision", Table: "watch_decision"},
-	{Name: "watch_trigger_thread", Table: "watch_trigger_thread"},
+	{Name: "watch_decision", Table: "watch_decision", columns: `, thread_key TEXT AS (json_extract(value,'$.threadKey'))`},
+	{Name: "watch_trigger_thread", Table: "watch_trigger_thread", columns: `,
+      trigger_id TEXT AS (json_extract(value,'$[0]')), thread_key TEXT AS (json_extract(value,'$[1]'))`},
 	{Name: "watch_event", Table: "watch_event"},
 	{Name: "watch_kv", Table: "watch_kv"},
 }
@@ -65,6 +73,11 @@ const documentColumns = "key TEXT PRIMARY KEY, value TEXT NOT NULL CHECK(json_va
 func createV1(tx *sql.Tx) error {
 	for _, c := range collections {
 		columns := documentColumns
+		// 显式命名 INTEGER PRIMARY KEY 使首次插入位置在更新和 VACUUM 后都保持稳定。
+		if c.ordered {
+			columns = "ordinal INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, value TEXT NOT NULL CHECK(json_valid(value))"
+		}
+		columns += c.columns
 		for _, col := range c.Generated {
 			columns += fmt.Sprintf(", %s TEXT GENERATED ALWAYS AS (json_type(value, '$.%s')) VIRTUAL", col.Field, col.Field)
 		}
@@ -73,7 +86,7 @@ func createV1(tx *sql.Tx) error {
 		}
 		for _, index := range c.Indexes {
 			name := c.Table + "_" + strings.ToLower(index.Name)
-			query := fmt.Sprintf("CREATE INDEX %s ON %s (key) WHERE %s IS NULL", name, c.Table, index.Missing)
+			query := fmt.Sprintf("CREATE INDEX %s ON %s (%s, ordinal) WHERE %s IS NULL", name, c.Table, index.Missing, index.Missing)
 			if _, err := tx.Exec(query); err != nil {
 				return fmt.Errorf("创建索引 %s: %w", name, err)
 			}
@@ -90,6 +103,8 @@ func createV1(tx *sql.Tx) error {
 			seq INTEGER NOT NULL, generation INTEGER NOT NULL, attempts INTEGER NOT NULL,
 			error TEXT, due TEXT NOT NULL, since TEXT NOT NULL, PRIMARY KEY (kind, key)
 		)`,
+		"CREATE INDEX effect_order ON watch_effect(kind,seq)",
+		"CREATE INDEX effect_due ON watch_effect(kind,due,seq)",
 		"CREATE TABLE alarm_state (" + documentColumns + ")",
 		"CREATE TABLE ext_state (" + documentColumns + ")",
 	} {
@@ -97,5 +112,5 @@ func createV1(tx *sql.Tx) error {
 			return fmt.Errorf("创建专用表: %w", err)
 		}
 	}
-	return nil
+	return createIndexes(tx)
 }

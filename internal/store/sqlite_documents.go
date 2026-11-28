@@ -9,7 +9,8 @@ import (
 	"github.com/chhuax/craft/internal/store/migrate"
 )
 
-func (r sqliteRead) Get(collection, key string) (json.RawMessage, bool, error) {
+// Get 从当前快照读取整份文档，以 found 区分缺失与 JSON null。
+func (r SQLiteReader) Get(collection, key string) (json.RawMessage, bool, error) {
 	table, _, err := migrate.Resolve(collection, All)
 	if err != nil {
 		return nil, false, err
@@ -25,7 +26,8 @@ func (r sqliteRead) Get(collection, key string) (json.RawMessage, bool, error) {
 	return value, true, nil
 }
 
-func (r sqliteRead) List(collection, filter string) (_ map[string]json.RawMessage, err error) {
+// List 按集合注册的谓词读取当前快照，返回的字节归调用方所有。
+func (r SQLiteReader) List(collection, filter string) (_ map[string]json.RawMessage, err error) {
 	table, missing, err := migrate.Resolve(collection, filter)
 	if err != nil {
 		return nil, err
@@ -63,7 +65,8 @@ func putQuery(table string) string {
 	return "INSERT INTO " + table + " (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
 }
 
-func (t *sqliteTx) Put(collection, key string, value json.RawMessage) error {
+// Put 替换整份文档，在同一条语句内维护其索引。
+func (t *SQLiteTx) Put(collection, key string, value json.RawMessage) error {
 	table, _, err := migrate.Resolve(collection, All)
 	if err != nil {
 		return err
@@ -78,7 +81,8 @@ func (t *sqliteTx) Put(collection, key string, value json.RawMessage) error {
 	return nil
 }
 
-func (t *sqliteTx) PutMany(collection string, docs []Doc) (err error) {
+// PutMany 按输入顺序整批写入，任一项失败即撤销本批。
+func (t *SQLiteTx) PutMany(collection string, docs []Doc) (err error) {
 	if len(docs) == 0 {
 		return nil
 	}
@@ -108,7 +112,8 @@ func (t *sqliteTx) PutMany(collection string, docs []Doc) (err error) {
 	})
 }
 
-func (t *sqliteTx) Delete(collection, key string) error {
+// Delete 删除文档并清除它的索引项，键缺失时也可提交。
+func (t *SQLiteTx) Delete(collection, key string) error {
 	table, _, err := migrate.Resolve(collection, All)
 	if err != nil {
 		return err

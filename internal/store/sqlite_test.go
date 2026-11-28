@@ -98,13 +98,20 @@ func TestSchemaV1(t *testing.T) {
 		t.Fatalf("user_version = %d, %v", version, err)
 	}
 	for table, want := range map[string][]string{
-		"watch_inbox":  {"id", "value", "at", "seq"},
-		"watch_effect": {"kind", "key", "value", "seq", "generation", "attempts", "error", "due", "since"},
-		"alarm_state":  {"key", "value"},
-		"ext_state":    {"key", "value"},
+		"watch_thread":         {"ordinal", "key", "value", "ready", "eval_id", "closed"},
+		"watch_work":           {"ordinal", "key", "value", "created", "origin_id", "origin_thread", "ended"},
+		"watch_subscription":   {"thread_key", "work_id"},
+		"watch_acceptance":     {"decision_id", "trigger_id", "work_id"},
+		"watch_trigger":        {"key", "value", "primary_thread"},
+		"watch_trigger_thread": {"key", "value", "trigger_id", "thread_key"},
+		"watch_decision":       {"key", "value", "thread_key"},
+		"watch_inbox":          {"id", "value", "at", "seq"},
+		"watch_effect":         {"kind", "key", "value", "seq", "generation", "attempts", "error", "due", "since"},
+		"alarm_state":          {"key", "value"},
+		"ext_state":            {"key", "value"},
 	} {
 		t.Run(table, func(t *testing.T) {
-			rows, err := s.reader.Query("SELECT name FROM pragma_table_info(?) ORDER BY cid", table)
+			rows, err := s.reader.Query("SELECT name FROM pragma_table_xinfo(?) ORDER BY cid", table)
 			if err != nil {
 				t.Fatal(err)
 			}

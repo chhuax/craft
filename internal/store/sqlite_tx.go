@@ -7,18 +7,25 @@ import (
 	"fmt"
 )
 
-type sqliteRead struct {
+// SQLiteReader 只在当前回调内使用，文档和索引共享同一快照。
+type SQLiteReader struct {
 	ctx context.Context
 	tx  *sql.Tx
 }
 
-type sqliteTx struct {
-	sqliteRead
+// SQLiteTx 在同一写事务内组合文档、计数器与队列操作。
+type SQLiteTx struct {
+	SQLiteReader
 	callbacks
 }
 
 // Read 从独立只读连接开始事务，同一回调的多次查询共享快照。
 func (s *SQLite) Read(ctx context.Context, fn func(ReadTx) error) error {
+	return s.View(ctx, func(r SQLiteReader) error { return fn(r) })
+}
+
+// View 在独立只读连接上提供 SQLite 的索引与队列读取能力。
+func (s *SQLite) View(ctx context.Context, fn func(SQLiteReader) error) error {
 	tx, err := s.reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return fmt.Errorf("开始 SQLite 读事务: %w", err)
@@ -29,20 +36,25 @@ func (s *SQLite) Read(ctx context.Context, fn func(ReadTx) error) error {
 		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 			return fmt.Errorf("建立 SQLite 读快照: %w", err)
 		}
-		return fn(sqliteRead{ctx, tx})
+		return fn(SQLiteReader{ctx, tx})
 	})
 }
 
 // Atomic 独占写连接直到提交或回滚，提交回调在释放写锁之后执行。
 func (s *SQLite) Atomic(ctx context.Context, fn func(Tx) error) error {
-	var write sqliteTx
+	return s.Write(ctx, func(t *SQLiteTx) error { return fn(t) })
+}
+
+// Write 在一个 IMMEDIATE 事务中提供文档和专用表的原子操作。
+func (s *SQLite) Write(ctx context.Context, fn func(*SQLiteTx) error) error {
+	var write SQLiteTx
 	err := s.withWriter(ctx, func() error {
 		tx, err := s.writer.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("开始 SQLite 写事务: %w", err)
 		}
 		return transact(tx, func(tx *sql.Tx) error {
-			write.sqliteRead = sqliteRead{ctx, tx}
+			write.SQLiteReader = SQLiteReader{ctx, tx}
 			return fn(&write)
 		})
 	})
@@ -70,7 +82,13 @@ func rollback(tx *sql.Tx, err *error) {
 	}
 }
 
-func (t *sqliteTx) Atomic(ctx context.Context, fn func(Tx) error) (err error) {
+// Atomic 将通用文档事务嵌套在当前保存点内。
+func (t *SQLiteTx) Atomic(ctx context.Context, fn func(Tx) error) error {
+	return t.Savepoint(ctx, func(child *SQLiteTx) error { return fn(child) })
+}
+
+// Savepoint 使内层的索引、计数器和提交回调能与文档一起撤销。
+func (t *SQLiteTx) Savepoint(ctx context.Context, fn func(*SQLiteTx) error) (err error) {
 	// SQLite 总是匹配最近的同名保存点；同一 Tx 同步嵌套，无需进程级计数器。
 	if _, err := t.tx.ExecContext(ctx, "SAVEPOINT nested"); err != nil {
 		return fmt.Errorf("建立保存点: %w", err)
@@ -92,7 +110,7 @@ func (t *sqliteTx) Atomic(ctx context.Context, fn func(Tx) error) (err error) {
 		}
 	}()
 
-	child := sqliteTx{sqliteRead: sqliteRead{ctx, t.tx}}
+	child := SQLiteTx{SQLiteReader: SQLiteReader{ctx, t.tx}}
 	if err := fn(&child); err != nil {
 		return fmt.Errorf("执行保存点事务: %w", err)
 	}
