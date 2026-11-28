@@ -68,13 +68,15 @@ func (c Confirmation) validate() error {
 
 // DocStatus 是单份文档的核对结果，移动时保留新位置。
 type DocStatus struct {
-	Path, State, MovedTo string
+	Path    string `json:"path"`
+	State   string `json:"state"`
+	MovedTo string `json:"movedTo,omitempty"`
 }
 
 // Verification 汇总已确认文档的当前状态：none、confirmed 或 stale。
 type Verification struct {
-	State string
-	Docs  []DocStatus
+	State string      `json:"state"`
+	Docs  []DocStatus `json:"docs"`
 }
 
 // Verify 只使用调用方提供的当前文档和移动候选。原路径存在时优先核对，防止副本掩盖正文改动。

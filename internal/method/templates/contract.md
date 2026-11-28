@@ -4,9 +4,9 @@ craft: {{.Version}}
 description: ""
 type: {{.Kind}}
 tier: {{.Tier}}
-workItems: []
-baseBranch: null
-capabilities: []
+workItems: [{{range $i, $v := .WorkItems}}{{if $i}}, {{end}}{{quote $v}}{{end}}]
+baseBranch: {{if .BaseBranch}}{{quote .BaseBranch}}{{else}}null{{end}}
+capabilities: [{{range $i, $v := .Capabilities}}{{if $i}}, {{end}}{{quote $v}}{{end}}]
 {{end -}}
 ---
 

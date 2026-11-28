@@ -170,7 +170,7 @@ func TestStoreConcurrent(t *testing.T) {
 				return
 			}
 			got, err := store.Load("unit")
-			if err != nil || got == nil || len(got.Docs) != 1 || got.Docs[0].Hash != normalizedHash(got.By) {
+			if err != nil || got == nil || len(got.Docs) != 1 || got.Docs[0].Hash != NormalizedHash(got.By) {
 				t.Error(got, err)
 			}
 		})

@@ -20,6 +20,23 @@ const (
 var assets = []string{
 	claudeManifest, codexManifest, "LICENSE", "NOTICE", "README.md", "bin/craft",
 	"hooks/codex-hooks.json", "hooks/hooks.json", "skills/craft-worker/SKILL.md", "skills/craft/SKILL.md",
+	"skills/method/SKILL.md",
+	"skills/method/assets/change.md",
+	"skills/method/assets/design.md",
+	"skills/method/assets/requirements.md",
+	"skills/method/examples/light-defect/change.md",
+	"skills/method/examples/standard-feature/design.md",
+	"skills/method/examples/standard-feature/requirements.md",
+	"skills/method/examples/standard-feature/tasks.md",
+	"skills/method/references/implement.md",
+	"skills/method/references/intent.md",
+	"skills/method/references/interfaces.md",
+	"skills/method/references/tasks.md",
+	"skills/method/references/team.md",
+	"skills/method/references/tiers.md",
+	"skills/method/references/types.md",
+	"skills/method/references/verify.md",
+	"skills/method/references/writing.md",
 }
 
 func sourceFile(name string) string {

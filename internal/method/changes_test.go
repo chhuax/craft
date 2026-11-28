@@ -107,7 +107,7 @@ func TestCommittedChangeProjection(t *testing.T) {
 	}
 	snap := takeSnapshot(t, dir)
 	zero := 0
-	if err := store.RecordClosing("change", instant, ClosingRun{"go test ./...", &zero, snap, snap}); err != nil {
+	if err := store.RecordClosing("change", instant, ClosingRun{Command: "go test ./...", Exit: &zero, Before: snap, After: snap}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.RecordReview("change", instant, snap, req, reviewer()); err != nil {

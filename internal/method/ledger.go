@@ -124,9 +124,12 @@ func (s *fileStore) RecordFact(change string, at time.Time, fact string) error {
 	return s.appendRecord(change, Record{Version: formatVersion, At: at.UTC(), Fact: strings.TrimSpace(fact)})
 }
 
+// ErrClosingRequired 表示报告与最后一次成功收尾无法绑定，调用方须重新取得当前快照的证据。
+var ErrClosingRequired = errors.New("需要与当前快照一致的成功收尾记录")
+
 // RecordReview 核对验证者所见快照和完整报告，再绑定到对应的收尾记录。
 func (s *fileStore) RecordReview(change string, at time.Time, current string, req Document, report VerifierReport) error {
-	if err := report.check(req); err != nil {
+	if err := report.Check(req); err != nil {
 		return err
 	}
 	log, err := s.LoadLedger(change)
@@ -134,8 +137,8 @@ func (s *fileStore) RecordReview(change string, at time.Time, current string, re
 		return err
 	}
 	full, _ := latestEvidence(log)
-	if full < 0 || log[full].Closing.state(current) != "pass" {
-		return fmt.Errorf("独立报告需要与当前快照一致的成功收尾记录")
+	if full < 0 || log[full].Closing.State(current) != "pass" {
+		return ErrClosingRequired
 	}
 	review := IndependentReview{ClosingLine: full + 1, Report: report, Pending: pendingAssumptions(req)}
 	return s.appendRecord(change, Record{Version: formatVersion, At: at.UTC(), Review: &review})
@@ -162,7 +165,7 @@ func (s *fileStore) appendRecord(change string, r Record) error {
 		if r.Review != nil {
 			full, _ := latestEvidence(log)
 			if r.Review.ClosingLine != full+1 {
-				return fmt.Errorf("记录独立报告期间出现了新的收尾验证")
+				return fmt.Errorf("记录报告期间出现新的收尾验证：%w", ErrClosingRequired)
 			}
 		}
 		if err := ensureIgnored(dir); err != nil {

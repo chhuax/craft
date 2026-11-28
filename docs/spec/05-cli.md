@@ -68,6 +68,25 @@ craft watch note --text T
 craft watch follow-context <thread-ref>
 craft watch mark-unrelated <thread-key>
 
+# 本地方法（人和执行方均可用；各命令支持 [--project DIR]，默认当前目录）
+craft method paths                         # 项目与状态目录
+craft method hash (--file FILE... | --check FILE [--also FILE...])  # 文档摘要与确认核对
+craft method snapshot                      # HEAD 与可见工作区内容的摘要
+craft method report check --file FILE --scenarios IDS   # 核对独立报告的场景集合
+craft method new --name NAME --type TYPE --tier TIER [--base-branch REF] [--draft] [--group GROUP] [--capability NAME...] [--item ID...] [--change ID] [--new-round]
+craft method status [--change ID | --list] [--item ID] # 变更清单或单项详情
+craft method flow [--change ID]             # 按文档、事实与确认现算进度
+craft method check [--change ID] [--for draft|confirm|exit]  # exit 有缺口返回 5，逐项见 error.detail.problems
+craft method confirm [--change ID] --by NAME            # 记录人对当前文档的确认
+craft method tier [--change ID] [--base REF]            # 根据契约与实际改动建议档位
+craft method tasks [--change ID]            # 从任务清单与 Task: 提交恢复进度
+craft method record [--change ID] (--run CMD [--timeout SEC] [--reuse] | --cmd TEXT --exit CODE)
+craft method verify [--change ID] --by NAME --report FILE   # 独立报告绑定当前成功的收尾记录；FILE 可为 -
+craft method evidence [--change ID]         # 确认、收尾、独立验证及事实记录
+craft method note [--change ID] [--out FILE] # 投影变更说明
+craft method archive [--change ID]          # 按能力合并接口与库表增量
+craft method fact [--change ID] --text TEXT # 记录本地事实，包括 design-skipped
+
 # 设置
 craft policy show|set                       # 事件模式、放行发送人、接活规则、暂停
 

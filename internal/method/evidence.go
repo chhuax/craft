@@ -14,6 +14,8 @@ type ClosingRun struct {
 	Exit    *int   `json:"exit"`
 	Before  string `json:"before"`
 	After   string `json:"after"`
+	// 只有实际执行的命令可复用，旧记录未区分来源。
+	Automatic bool `json:"automatic,omitempty"`
 }
 
 // ScenarioVerdict 保存验证者对一个场景的结论和可定位的依据。
@@ -104,7 +106,8 @@ func (r VerifierReport) validate() error {
 	return nil
 }
 
-func (r VerifierReport) check(req Document) error {
+// Check 核对报告与需求的逐项对应关系，可在保存前独立校验。
+func (r VerifierReport) Check(req Document) error {
 	if err := r.validate(); err != nil {
 		return err
 	}
@@ -132,7 +135,8 @@ func pendingAssumptions(req Document) []PendingAssumption {
 	return pending
 }
 
-func (r VerifierReport) result() string {
+// Result 汇总已核对报告的逐项结论，含未验证场景时整体不能通过。
+func (r VerifierReport) Result() string {
 	for _, s := range r.Scenarios {
 		if s.Result != "pass" {
 			return "fail"
@@ -157,7 +161,8 @@ func latestEvidence(log []Record) (closing, review int) {
 	return closing, review
 }
 
-func (c ClosingRun) state(current string) string {
+// State 用当前快照区分本次收尾的通过、失败、过期或无法验证。
+func (c ClosingRun) State(current string) string {
 	if c.Exit == nil || !validDigest(c.After) || c.Before != c.After {
 		return "unverified"
 	}
@@ -181,15 +186,15 @@ func AssessEvidence(req Document, log []Record, current string) EvidenceStatus {
 		s.Closing = "unverified"
 		return s
 	}
-	s.Closing = log[full].Closing.state(current)
+	s.Closing = log[full].Closing.State(current)
 	if review < 0 {
 		return s
 	}
 	r := log[review].Review
-	if s.Closing != "pass" || r.Report.check(req) != nil || !slices.Equal(r.Pending, pendingAssumptions(req)) || log[review].validate() != nil {
+	if s.Closing != "pass" || r.Report.Check(req) != nil || !slices.Equal(r.Pending, pendingAssumptions(req)) || log[review].validate() != nil {
 		s.Review = "stale"
 	} else {
-		s.Review = r.Report.result()
+		s.Review = r.Report.Result()
 	}
 	return s
 }
