@@ -34,7 +34,15 @@ var lookups = map[string]string{
 	"decisionBySource":  `SELECT key,value FROM watch_decision WHERE substr(thread_key,1,instr(thread_key,':')-1)=? AND key>? AND (?='' OR value->>'$.kind'=?) ORDER BY key LIMIT ?`,
 	"observedDecisions": `SELECT key,value FROM watch_decision INDEXED BY decision_observed WHERE value->>'$.audit.would_accept'=1 AND key>? AND (?='' OR value->>'$.kind'=?) AND (?='' OR substr(thread_key,1,instr(thread_key,':')-1)=?) ORDER BY key LIMIT ?`,
 	"decisionPage":      "SELECT key,value FROM watch_decision WHERE key>? ORDER BY key LIMIT ?",
-	"outboxState":       "SELECT key,value FROM outbox WHERE state=? ORDER BY key",
+	"requests":          "SELECT key,value FROM watch_alarm_request WHERE status=? ORDER BY ordinal LIMIT ?",
+	"stateGet":          "SELECT key,value FROM ext_state WHERE namespace=? AND key=?",
+	"stateKeys":         "SELECT key,NULL FROM ext_state WHERE namespace=? ORDER BY key",
+	"subscribed": `SELECT t.key,t.value FROM watch_thread t WHERE t.key>=?1 AND t.key<?2
+		AND json_array_length(t.value,'$.subscriptions')>0
+		AND (coalesce(nullif(t.value->>'$.lastAt',''),t.value->>'$.createdAt')>=?3 OR EXISTS (
+			SELECT 1 FROM json_each(t.value,'$.subscriptions') s CROSS JOIN watch_work w
+			WHERE w.key=s.value AND (w.ended IS NULL OR w.value->>'$.ended.at'>=?3))) ORDER BY t.key`,
+	"outboxState": "SELECT key,value FROM outbox WHERE state=? ORDER BY key",
 	// 只数到上限，窗口内历史记录再多也不影响准入成本。
 	"autoWindow": "SELECT key,NULL FROM outbox WHERE auto_at>? AND auto_at<=? LIMIT 1 OFFSET ?",
 	"pending":    "SELECT key,value FROM watch_thread WHERE closed IS NULL AND ready=1 ORDER BY ordinal",

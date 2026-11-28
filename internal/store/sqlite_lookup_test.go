@@ -20,6 +20,8 @@ func TestLookupPlans(t *testing.T) {
 		"attentionWorks": {"work_attention"}, "warningKeys": {"decision_warning"},
 		"decisionByKind": {"decision_kind"}, "decisionBySource": {"decision_source"}, "observedDecisions": {"decision_observed"},
 		"sessionWorks": {"work_session"}, "decisionPage": {"sqlite_autoindex_watch_decision_1"},
+		"requests": {"INDEX alarm_request_status"}, "subscribed": {"INDEX thread_subscribed", "INDEX sqlite_autoindex_watch_work_1"},
+		"stateGet": {"PRIMARY KEY"}, "stateKeys": {"PRIMARY KEY"},
 		"outboxState": {"INDEX outbox_state"}, "autoWindow": {"INDEX outbox_auto_at"},
 		"pending": {"INDEX thread_pending"}, "evaluating": {"INDEX thread_eval"}, "eval": {"INDEX thread_eval"},
 		"open": {"INDEX watch_work_active"}, "recent": {"INDEX work_recent"}, "origin": {"INDEX work_origin"},
@@ -37,6 +39,7 @@ func TestLookupPlans(t *testing.T) {
 	for _, collection := range []string{"watch_trigger", "watch_disposition", "watch_thread", "watch_work", "watch_decision"} {
 		t.Run(collection, func(t *testing.T) { checkPlan(t, s, manyQuery(collection), "INDEX sqlite_autoindex_"+collection) })
 	}
+	checkPlan(t, s, getQuery("watch_thread"), "INDEX sqlite_autoindex_watch_thread_1 (key=?)")
 	checkPlan(t, s, getQuery("outbox"), "INDEX sqlite_autoindex_outbox_1 (key=?)")
 	checkPlan(t, s, getQuery("watch_reply_status"), "INDEX sqlite_autoindex_watch_reply_status_1 (key=?)")
 	checkPlan(t, s, effectByKey, "INDEX sqlite_autoindex_watch_effect_1 (kind=? AND key=?)")

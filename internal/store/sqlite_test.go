@@ -113,7 +113,8 @@ func TestSchemaV1(t *testing.T) {
 		"effect_count":         {"kind", "waiting"},
 		"outbox":               {"key", "value", "state", "auto_at"},
 		"alarm_state":          {"key", "value"},
-		"ext_state":            {"key", "value"},
+		"ext_state":            {"namespace", "key", "value"},
+		"watch_alarm_request":  {"ordinal", "key", "value", "status"},
 	} {
 		t.Run(table, func(t *testing.T) {
 			rows, err := s.reader.Query("SELECT name FROM pragma_table_xinfo(?) ORDER BY cid", table)
