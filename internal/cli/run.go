@@ -64,6 +64,7 @@ func commands() []commandSpec {
 	return []commandSpec{
 		{"version", "", "", local, versionResult},
 		{"doctor", "", "", local, doctorResult},
+		{"hook session-start", "", "--host HOST", local, sessionStart},
 		{"daemon run", "", "", person, daemonRun},
 		{"daemon start", "", "", person, daemonStart},
 		{"daemon stop", "", "[--force]", person, daemonStop},
@@ -275,6 +276,12 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 		return failure(stderr, asJSON, err)
 	}
 	switch checks := res.payload.(type) {
+	case sessionStartOutput:
+		// 宿主只识别自己的 JSON 信封，输出失败也不能中断会话启动。
+		if err := json.NewEncoder(stdout).Encode(checks); err != nil {
+			_, _ = fmt.Fprintf(stderr, "写入 SessionStart 输出失败: %v\n", err)
+		}
+		return 0
 	case []app.Check:
 		return reportChecks(stdout, asJSON, checks, "failed", "安装自检未通过")
 	case []conformance.Check:

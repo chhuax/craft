@@ -25,7 +25,7 @@ import (
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "daemon":
+		case "daemon", "hook":
 			os.Exit(Run(os.Args[1:], "dev", os.Stdout, os.Stderr))
 		case "--action-fixture":
 			runActionFixture()

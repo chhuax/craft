@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/chhuax/craft/internal/engine"
@@ -82,6 +83,18 @@ func (r CommandReader) Attention() ([]engine.AttentionItem, error) {
 		return nil, err
 	}
 	return mergeAttention(engine.Attention(set), outbound.PendingConfirmations(rows)), nil
+}
+
+// SessionAttention 只在已有快照上取开场摘要，区分未初始化与确有零项待办。
+func (r CommandReader) SessionAttention() (int, []engine.AttentionItem, error) {
+	if r.read == nil {
+		return 0, nil, os.ErrNotExist
+	}
+	items, err := r.Attention()
+	if err != nil {
+		return 0, nil, err
+	}
+	return len(items), items[:min(3, len(items))], nil
 }
 
 func mergeAttention(items []engine.AttentionItem, pending []outbound.Confirmation) []engine.AttentionItem {
