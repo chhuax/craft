@@ -29,7 +29,7 @@ type RunRequest struct {
 }
 
 // Config 在创建时确定总并发上限（必填）与健康阈值（默认 5）。
-// Rand 可注入独占的随机源。OnHealth 在越过阈值和恢复时于锁外调用，可并发处理不同 ID，须及时返回。
+// Rand 可注入独占的随机源。OnHealth 在越过阈值和恢复时于锁外调用，不同 ID 可并发通知，须及时返回且不可同步等待 Stop。
 type Config struct {
 	Clock            Clock
 	Rand             *rand.Rand
