@@ -23,6 +23,7 @@ func Run(t *testing.T, factory func(t *testing.T) engine.Store) {
 		{"已关闭自有对象的结果", closeWithPriorOwnFact},
 		{"重绑后的关闭重放", reboundClose},
 		{"关闭与重开联动", propagateClose},
+		{"改版与设置事务", policyTransition},
 		{"人工停止与事务回滚", stopAtomic},
 		{"重试派工", workRetry},
 		{"人工请求与忽略故障", humanDecisions},
