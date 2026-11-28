@@ -8,6 +8,14 @@
         "statusMessage": "正在读取 craft 工作状态",
         "timeout": 15
       }]
+    }],
+    "Stop": [{
+      "hooks": [{
+        "type": "command",
+        "command": "sh \"${PLUGIN_ROOT}/bin/craft\" hook stop --host codex",
+        "commandWindows": "\"${PLUGIN_ROOT}\\bin\\craft.exe\" hook stop --host codex",
+        "timeout": 15
+      }]
     }]
   }
 }

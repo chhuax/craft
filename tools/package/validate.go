@@ -170,24 +170,32 @@ func checkHook(root, name string, raw []byte) error {
 	if err := json.Unmarshal(raw, &config); err != nil {
 		return err
 	}
-	groups := config.Hooks["SessionStart"]
-	if len(config.Hooks) != 1 || len(groups) != 1 || len(groups[0].Hooks) != 1 {
-		return errors.New("需要一个 SessionStart 命令")
+	if len(config.Hooks) != 2 {
+		return errors.New("需要 SessionStart 和 Stop 两项钩子")
 	}
-	h := groups[0].Hooks[0]
-	if h.Type != "command" || h.Timeout != 15 {
-		return errors.New("SessionStart 类型或超时错误")
+	claude := name == "hooks/hooks.json"
+	for _, event := range []struct{ name, command string }{{"SessionStart", "session-start"}, {"Stop", "stop"}} {
+		groups := config.Hooks[event.name]
+		if len(groups) != 1 || len(groups[0].Hooks) != 1 {
+			return fmt.Errorf("需要一个 %s 命令", event.name)
+		}
+		h := groups[0].Hooks[0]
+		if h.Type != "command" || h.Timeout != 15 || event.name == "Stop" && groups[0].Matcher != "" {
+			return fmt.Errorf("%s 类型、超时或 matcher 错误", event.name)
+		}
+		// 按宿主约定核对入口，避免执行素材里的 shell 文本。
+		if claude {
+			if h.Command != `sh "${CLAUDE_PLUGIN_ROOT}/bin/craft" hook `+event.command+" --host claude-code" || h.CommandWindows != "" ||
+				event.name == "SessionStart" && groups[0].Matcher != "startup|resume|clear|compact" {
+				return fmt.Errorf("不符合 Claude Code 的 %s 钩子约定", event.name)
+			}
+		} else if h.Command != `sh "${PLUGIN_ROOT}/bin/craft" hook `+event.command+" --host codex" ||
+			h.CommandWindows != `"${PLUGIN_ROOT}\bin\craft.exe" hook `+event.command+" --host codex" ||
+			event.name == "SessionStart" && h.StatusMessage == "" {
+			return fmt.Errorf("不符合 Codex 的 %s 钩子约定", event.name)
+		}
 	}
-	// 不执行素材里的 shell 文本来找路径。两个宿主只接受各自的根变量和命令形态。
-	if name == "hooks/hooks.json" {
-		if groups[0].Matcher != "startup|resume|clear|compact" || h.Command != `sh "${CLAUDE_PLUGIN_ROOT}/bin/craft" hook session-start --host claude-code` || h.CommandWindows != "" {
-			return errors.New("不符合 Claude Code 的 matcher、命令或入口引用约定")
-		}
-	} else {
-		if h.StatusMessage == "" || h.Command != `sh "${PLUGIN_ROOT}/bin/craft" hook session-start --host codex` ||
-			h.CommandWindows != `"${PLUGIN_ROOT}\bin\craft.exe" hook session-start --host codex` {
-			return errors.New("不符合 Codex 的命令或入口引用约定")
-		}
+	if !claude {
 		if _, err := os.Stat(filepath.Join(root, "bin/craft.exe")); err != nil {
 			return fmt.Errorf("commandWindows 引用: %w", err)
 		}

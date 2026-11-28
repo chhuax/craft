@@ -124,6 +124,9 @@ func TestPackageValidation(t *testing.T) {
 		{"hook引用", ".codex-plugin/plugin.json", "./hooks/codex-hooks.json", "./hooks/missing.json"},
 		{"入口引用", "hooks/hooks.json", "/bin/craft", "/bin/missing"},
 		{"Windows入口引用", "hooks/codex-hooks.json", "craft.exe", "missing.exe"},
+		{"Claude Stop 命令", "hooks/hooks.json", "hook stop --host claude-code", "hook stop --host codex"},
+		{"Codex Stop 事件", "hooks/codex-hooks.json", `"Stop"`, `"Other"`},
+		{"Codex Stop 的 Windows 入口", "hooks/codex-hooks.json", `craft.exe\" hook stop`, `missing.exe\" hook stop`},
 		{"清单版本", ".codex-plugin/plugin.json", testVersion, "2.0"},
 		{"包版本", "VERSION", testVersion, "1.0.0"},
 	} {
