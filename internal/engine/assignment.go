@@ -20,6 +20,39 @@ func currentAssignment(w *Work) *Assignment {
 	return a
 }
 
+// SetExecution 登记最新派工的目录和会话，保留目标快照。传空会话清除已失联的登记。
+// 返回 false 表示代次失效或已有另一个会话，创建方须停止未被接纳的会话。
+func (e *Engine) SetExecution(ctx context.Context, workID, assignmentID, directory string, session *Session, bootstrapped bool) (bool, error) {
+	var accepted bool
+	_, err := e.withWork(ctx, "登记执行位置", workID, false, func(u Unit, w *Work, now string) error {
+		a := currentAssignment(w)
+		if a == nil || a.ID != assignmentID {
+			return nil
+		}
+		if w.Execution == nil {
+			w.Execution = &Execution{}
+		}
+		x := w.Execution
+		if session != nil && (session.Host == "" || session.ID == "") {
+			return fmt.Errorf("会话缺少宿主或标识")
+		}
+		if session != nil && x.Session != nil && *x.Session != *session {
+			return nil
+		}
+		accepted = true
+		if session != nil && x.Session != nil && x.Bootstrapped != nil && *x.Bootstrapped {
+			bootstrapped = true
+		}
+		if directory == x.Directory && x.Assignment == a.ID && (session == nil && x.Session == nil || sessionMatches(w, session)) && x.Bootstrapped != nil && *x.Bootstrapped == bootstrapped {
+			return nil
+		}
+		x.Directory, x.Session, x.Assignment, x.Bootstrapped = directory, session, a.ID, &bootstrapped
+		w.UpdatedAt = now
+		return u.PutWork(*w)
+	})
+	return accepted && err == nil, err
+}
+
 // AssignmentStarted 确认最新派工的首条送达。重复回执不覆盖轮次起点，也不重复唤醒。
 func (e *Engine) AssignmentStarted(ctx context.Context, workID, assignmentID, at string) error {
 	_, err := e.withWork(ctx, "确认启动", workID, false, func(u Unit, w *Work, now string) error {
@@ -30,6 +63,10 @@ func (e *Engine) AssignmentStarted(ctx context.Context, workID, assignmentID, at
 		start, err := deliveryTime(at, now)
 		if err != nil {
 			return err
+		}
+		if w.Execution != nil && w.Execution.Session != nil {
+			w.Execution.Bootstrapped = new(true)
+			w.Execution.Assignment = a.ID
 		}
 		a.State = AssignmentRunning
 		if a.StartedAt == "" {

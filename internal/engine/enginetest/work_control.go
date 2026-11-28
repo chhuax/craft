@@ -305,3 +305,66 @@ func stopWithoutSession(t *testing.T, s engine.Store) {
 		t.Fatalf("没有会话时的停止 %+v，stop 入队 %d 次", stopped.Ended, stops)
 	}
 }
+
+func stopRegistered(t *testing.T, s engine.Store) {
+	ctx := t.Context()
+	for _, tc := range []struct {
+		name  string
+		state engine.AssignmentState
+		owner string
+		want  bool
+	}{
+		{"首条未确认", engine.AssignmentPending, "current", true},
+		{"未创建", engine.AssignmentPending, "", false},
+		{"沿用前代位置尚未登记", engine.AssignmentPending, "old", false},
+		{"已经启动", engine.AssignmentRunning, "current", true},
+		{"已经结束", engine.AssignmentEnded, "current", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := engine.Work{ID: tc.name, Assignments: []engine.Assignment{{ID: "old", State: engine.AssignmentPending}, {ID: "current", State: tc.state}}}
+			session := engine.Session{Host: "local", ID: tc.name}
+			if tc.owner != "" {
+				w.Execution = &engine.Execution{Session: &session, Assignment: tc.owner}
+			}
+			saveWork(t, s, w)
+			var stops int
+			fail := tc.want
+			e := newEngine(t, config(&queueStore{Store: s, check: func(kind, key string, raw json.RawMessage) error {
+				if kind != "stop" {
+					return nil
+				}
+				var payload struct {
+					WorkID, AssignmentID string
+					Session              engine.Session
+				}
+				must(t, json.Unmarshal(raw, &payload))
+				if key != "current" || payload.AssignmentID != key || payload.WorkID != w.ID || payload.Session != session {
+					t.Fatalf("停止了错误的派工或会话 %s %s", key, raw)
+				}
+				if fail {
+					return errQueue
+				}
+				stops++
+				return nil
+			}}))
+			if fail {
+				before := readWork(t, s, w.ID)
+				_, err := e.StopWork(ctx, w.ID, "终止")
+				if !errors.Is(err, errQueue) || !reflect.DeepEqual(before, readWork(t, s, w.ID)) {
+					t.Fatal("入队失败没有整体回滚", err)
+				}
+				fail = false
+			}
+			for range 2 {
+				stopped, err := e.StopWork(ctx, w.ID, "终止")
+				must(t, err)
+				if stopped.Ended == nil {
+					t.Fatal("工作没有结束")
+				}
+			}
+			if (tc.want && stops != 1) || (!tc.want && stops != 0) {
+				t.Fatalf("stop 入队 %d 次", stops)
+			}
+		})
+	}
+}

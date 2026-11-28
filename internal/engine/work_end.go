@@ -33,11 +33,13 @@ func endWork(u Unit, w *Work, end WorkEnd, threads map[string]*Thread, now strin
 	w.Delivery = nil
 	w.Undelivered = nil
 	w.DeliveryBatch = nil
-	var running []string
+	var toStop []string
 	for i := range w.Assignments {
 		a := &w.Assignments[i]
-		if a.State == AssignmentRunning {
-			running = append(running, a.ID)
+		// 首条回执可能丢失，派工仍是 pending；重试时保留的旧会话不能算作新代次的登记。
+		registered := i == len(w.Assignments)-1 && w.Execution != nil && w.Execution.Assignment == a.ID
+		if a.State == AssignmentRunning || a.State == AssignmentPending && registered {
+			toStop = append(toStop, a.ID)
 		}
 		if a.State != AssignmentEnded {
 			a.State = AssignmentEnded
@@ -54,7 +56,7 @@ func endWork(u Unit, w *Work, end WorkEnd, threads map[string]*Thread, now strin
 	if err := emitEvent(u, "work.ended", now, map[string]string{"work": w.ID}, data); err != nil {
 		return err
 	}
-	for _, id := range running {
+	for _, id := range toStop {
 		if err := enqueueStop(u, w, id); err != nil {
 			return err
 		}

@@ -120,6 +120,11 @@ func generationCallbacks(t *testing.T, s engine.Store) {
 				checkCode(t, err, engine.CodeUnknownAssignment)
 			}
 			must(t, e.AssignmentStarted(ctx, w.ID, "a", ""))
+			ok, err := e.SetExecution(ctx, w.ID, "a", "late", nil, false)
+			must(t, err)
+			if ok {
+				t.Fatal("迟到的回调清除了执行位置")
+			}
 			mark, err := e.PrepareDelivery(ctx, w.ID, "a", w.Undelivered)
 			must(t, err)
 			if mark != "" {
@@ -346,5 +351,37 @@ func deliveryReplay(t *testing.T, s engine.Store) {
 	send(ids)
 	if !slices.Equal(sent, []string{want}) {
 		t.Fatalf("同一批次实际发送标记 %v", sent)
+	}
+}
+
+func registerExecution(t *testing.T, s engine.Store) {
+	ctx := t.Context()
+	e := newEngine(t, config(s))
+	w := assignmentFixture("location")
+	w.Execution.Session = nil
+	w.Assignments[0].State = engine.AssignmentPending
+	saveWork(t, s, w)
+	session := engine.Session{Host: "local", ID: "created"}
+	for _, id := range []string{"old", "a", "a"} {
+		ok, err := e.SetExecution(ctx, w.ID, id, "directory", &session, false)
+		must(t, err)
+		if ok != (id == "a") {
+			t.Fatal("登记接受了错误代次", id)
+		}
+		got := readWork(t, s, w.ID)
+		a := got.Assignments[0]
+		if a.DeliveredAt != "" || a.State != engine.AssignmentPending || got.Execution.Target.ID != "target" {
+			t.Fatal(got)
+		}
+		if ok && (*got.Execution.Session != session || got.Execution.Assignment != id) {
+			t.Fatal(got.Execution)
+		}
+	}
+	must(t, e.AssignmentStarted(ctx, w.ID, "a", now))
+	ok, err := e.SetExecution(ctx, w.ID, "a", "directory", &session, false)
+	must(t, err)
+	got := readWork(t, s, w.ID)
+	if !ok || got.Assignments[0].DeliveredAt != now || got.Execution.Bootstrapped == nil || !*got.Execution.Bootstrapped {
+		t.Fatal("重放登记丢失了已确认的首条")
 	}
 }
