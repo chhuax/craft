@@ -33,7 +33,7 @@ func (wallClock) Now() time.Time { return time.Now() }
 func (wallClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 // Options 在启动前确定。LogDir 由调用方指定；超时、稳定期及 Clock 的零值使用默认值。
-// OnHealth 收到 ok 或 error 和原因，须及时返回且不可在回调内同步等待 Stop。
+// OnHealth 收到 ok、warning（已就绪但缺凭据）或 error 和原因，须及时返回且不可在回调内同步等待 Stop。
 type Options struct {
 	KernelVersion    string
 	Config           json.RawMessage
@@ -44,6 +44,7 @@ type Options struct {
 	StablePeriod     time.Duration
 	Clock            Clock
 	Handler          Handler
+	GetCredential    CredentialGetter
 	OnHealth         func(id, state, detail string)
 }
 
@@ -60,6 +61,7 @@ type Host struct {
 }
 
 type child struct {
+	warning  string
 	conn     *Conn
 	killTree func() error
 	exited   chan struct{}
@@ -89,6 +91,8 @@ func Start(ctx context.Context, ext Extension, opts Options) (*Host, error) {
 	}
 	// 重启仍使用首次装载的命令与配置，调用方之后可以复用自己的缓冲。
 	ext.Manifest.Exec = slices.Clone(ext.Manifest.Exec)
+	ext.Manifest.Env = slices.Clone(ext.Manifest.Env)
+	ext.Manifest.Credentials = slices.Clone(ext.Manifest.Credentials)
 	opts.Config = bytes.Clone(opts.Config)
 	life, stop := context.WithCancel(context.Background())
 	h := &Host{ext: ext, opts: opts, life: life, stop: stop, done: make(chan struct{})}
@@ -98,7 +102,7 @@ func Start(ctx context.Context, ext Extension, opts Options) (*Host, error) {
 		h.health("error", err.Error())
 		return nil, err
 	}
-	h.publish(p.conn)
+	h.publish(p)
 	go h.supervise(p)
 	return h, nil
 }
@@ -109,11 +113,19 @@ func (h *Host) health(state, detail string) {
 	}
 }
 
-func (h *Host) publish(c *Conn) {
+func (h *Host) publish(p *child) {
+	var c *Conn
+	if p != nil {
+		c = p.conn
+	}
 	h.mu.Lock()
 	h.ready = c
 	h.mu.Unlock()
-	if c != nil {
+	if p != nil {
+		if p.warning != "" {
+			h.health("warning", p.warning)
+			return
+		}
 		h.health("ok", "")
 	}
 }
@@ -126,7 +138,7 @@ func (h *Host) launch(ctx context.Context) (*child, error) {
 	if m.Protocol != protocolMajor {
 		return nil, fmt.Errorf("%s protocol %d 与内核主版本 %d 不兼容", m.ID, m.Protocol, protocolMajor)
 	}
-	p, err := launchProcess(h.ext, h.opts.LogDir, h.opts.Handler, nil)
+	p, err := launchProcess(h.ext, h.opts.LogDir, h.opts.Handler, nil, h.opts.GetCredential)
 	if err != nil {
 		return nil, err
 	}
@@ -152,8 +164,8 @@ func (h *Host) launch(ctx context.Context) (*child, error) {
 
 // OpenProcess 启动一次独立的协议会话，由调用方负责握手和截止时间。返回的回收函数必须调用一次；传入上下文时，先等候进程自行退出至截止时刻。
 // observe 在读写循环中同步收到协议行（incoming 表示扩展发出），须及时返回，不能保留缓冲区。
-func OpenProcess(ext Extension, logDir string, handler Handler, observe func(incoming bool, line []byte)) (*Conn, func(context.Context) error, error) {
-	p, err := launchProcess(ext, logDir, handler, observe)
+func OpenProcess(ext Extension, logDir string, handler Handler, observe func(incoming bool, line []byte), get CredentialGetter) (*Conn, func(context.Context) error, error) {
+	p, err := launchProcess(ext, logDir, handler, observe, get)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -170,7 +182,7 @@ func OpenProcess(ext Extension, logDir string, handler Handler, observe func(inc
 	}, nil
 }
 
-func launchProcess(ext Extension, logDir string, handler Handler, observe func(bool, []byte)) (*child, error) {
+func launchProcess(ext Extension, logDir string, handler Handler, observe func(bool, []byte), get CredentialGetter) (*child, error) {
 	m := ext.Manifest
 	if !validID(m.ID) || len(m.Exec) == 0 || !filepath.IsLocal(m.Exec[0]) {
 		return nil, fmt.Errorf("无效的扩展 id 或 exec[0]")
@@ -184,16 +196,22 @@ func launchProcess(ext Extension, logDir string, handler Handler, observe func(b
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("exec %s 须为文件", path)
 	}
+	env, warning, err := m.environment(get)
+	if err != nil {
+		return nil, err
+	}
 	log, err := openLog(logDir, m.ID)
 	if err != nil {
 		return nil, err
 	}
 	cmd := exec.Command(path, m.Exec[1:]...)
 	cmd.Dir = ext.Dir
+	cmd.Env = env
 	p, err := startChild(cmd, log, handler, observe)
 	if err != nil {
 		return nil, fmt.Errorf("启动 %s: %w", m.ID, err)
 	}
+	p.warning = warning
 	return p, nil
 }
 
@@ -298,7 +316,7 @@ func (h *Host) supervise(p *child) {
 			h.stopErr = h.shutdown(p)
 			return
 		}
-		h.publish(p.conn)
+		h.publish(p)
 	}
 }
 

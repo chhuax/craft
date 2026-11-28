@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chhuax/craft/internal/alarm"
+	"github.com/chhuax/craft/internal/cred"
 	"github.com/chhuax/craft/internal/engine"
 	"github.com/chhuax/craft/internal/exthost"
 	"github.com/chhuax/craft/internal/outbound"
@@ -139,11 +140,12 @@ func (d *Daemon) start(ctx, run context.Context) error {
 	if err := d.startRuntime(ctx, extensions); err != nil {
 		return err
 	}
+	vault := cred.New(stateDir)
 	for _, ext := range extensions {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := d.startHost(ctx, ext); err != nil {
+		if err := d.startHost(ctx, ext, vault.Get); err != nil {
 			return err
 		}
 	}
@@ -227,7 +229,7 @@ type restartClock struct{ alarm.Clock }
 // After 让扩展的重启退避和闹钟使用同一条时间线。
 func (c restartClock) After(d time.Duration) <-chan time.Time { return c.NewTimer(d).C }
 
-func (d *Daemon) startHost(ctx context.Context, ext exthost.Extension) error {
+func (d *Daemon) startHost(ctx context.Context, ext exthost.Extension, get exthost.CredentialGetter) error {
 	for _, dep := range ext.Manifest.Requires {
 		if d.hosts[dep] == nil {
 			d.health.set(d.health.state.Rejected, ext.ManifestPath, "rejected", "依赖未就绪 "+dep)
@@ -244,13 +246,19 @@ func (d *Daemon) startHost(ctx context.Context, ext exthost.Extension) error {
 		d.health.set(d.health.state.Rejected, ext.ManifestPath, "rejected", err.Error())
 		return nil
 	}
-	h, err := exthost.Start(ctx, ext, exthost.Options{KernelVersion: d.cfg.Version, Config: []byte("{}"), StateDir: stateDir, LogDir: filepath.Join(d.cfg.StateDir, "logs"), Clock: restartClock{d.cfg.Clock}, Handler: handler, OnHealth: func(id, state, detail string) {
-		status := "ready"
-		if state != "ok" {
-			status = "restarting"
-		}
-		d.health.set(d.health.state.Extensions, id, status, detail)
-	}})
+	h, err := exthost.Start(ctx, ext, exthost.Options{
+		KernelVersion: d.cfg.Version, Config: []byte("{}"), StateDir: stateDir,
+		LogDir: filepath.Join(d.cfg.StateDir, "logs"), Clock: restartClock{d.cfg.Clock},
+		Handler: handler, GetCredential: get,
+		OnHealth: func(id, state, detail string) {
+			status := "ready"
+			if state == "warning" {
+				detail = "warning: " + detail
+			} else if state != "ok" {
+				status = "restarting"
+			}
+			d.health.set(d.health.state.Extensions, id, status, detail)
+		}})
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()

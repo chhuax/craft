@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "protocol": 1,
   "exec": ["./craft-ext-github"],
+  "credentials": [{"name": "default", "env": "GITHUB_TOKEN"}],
   "alarms": [
     {"id": "inbox", "every": "5m", "jitter": "30s", "timeout": "2m", "default_enabled": true},
     {"id": "subscribed", "every": "5m", "timeout": "2m", "default_enabled": true}

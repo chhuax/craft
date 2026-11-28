@@ -65,6 +65,14 @@ func fakeExtension(mode string) error {
 			if err != nil {
 				return err
 			}
+		case "fixture/environment":
+			_, leaked := os.LookupEnv("ANTHROPIC_API_KEY")
+			_, missing := os.LookupEnv("ABSENT_TOKEN")
+			var err error
+			result, err = json.Marshal([]bool{!leaked, os.Getenv("SITE_OPTION") == "declared", os.Getenv("DEMO_TOKEN") == "injected", !missing, os.Getenv("HTTPS_PROXY") == "proxy"})
+			if err != nil {
+				return err
+			}
 		case "alarm/run":
 			var a protocol.AlarmRunParams
 			if err := json.Unmarshal(*req.Params, &a); err != nil {
@@ -173,7 +181,7 @@ func fixture(t *testing.T, mode string) (Extension, Options) {
 	t.Setenv(fixtureEnv, mode)
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	name := "extension" + filepath.Ext(os.Args[0])
-	path := putManifest(t, root, "demo", strings.Replace(manifestText("demo", ""), "./ext", name, 1))
+	path := putManifest(t, root, "demo", strings.Replace(manifestText("demo", `,"env":["CRAFT_TEST_EXTENSION","GORACE"]`), "./ext", name, 1))
 	dest := filepath.Join(filepath.Dir(path), name)
 	// Windows 上临时目录可能位于另一卷，测试不依赖硬链接权限。
 	src, err := os.Open(os.Args[0])
@@ -446,5 +454,37 @@ func TestParentExitWithInheritedPipes(t *testing.T) {
 	case <-clock.timers:
 	case <-ctx.Done():
 		t.Fatal("未回收进程树")
+	}
+}
+
+func TestChildEnvironment(t *testing.T) {
+	e, o := fixture(t, "normal")
+	t.Setenv("ANTHROPIC_API_KEY", "private")
+	t.Setenv("SITE_OPTION", "declared")
+	t.Setenv("DEMO_TOKEN", "ambient")
+	t.Setenv("ABSENT_TOKEN", "ambient")
+	t.Setenv("HTTPS_PROXY", "proxy")
+	e.Manifest.Env = append(e.Manifest.Env, "SITE_OPTION", "DEMO_TOKEN", "ABSENT_TOKEN")
+	e.Manifest.Credentials = []CredentialDecl{{Name: "default", Env: "DEMO_TOKEN"}, {Name: "other", Env: "ABSENT_TOKEN"}}
+	o.GetCredential = func(provider, name string) (string, bool, error) {
+		if provider != "demo" {
+			t.Fatalf("错误的 provider %s", provider)
+		}
+		return "injected", name == "default", nil
+	}
+	var state, detail string
+	o.OnHealth = func(_ string, s, d string) { state, detail = s, d }
+	var observed []bool
+	h := launch(t, e, o)
+	if err := h.Call(t.Context(), "fixture/environment", struct{}{}, &observed); err != nil {
+		t.Fatal(err)
+	}
+	if state != "warning" || !strings.Contains(detail, "demo/other") || strings.Contains(detail, "injected") || len(observed) != 5 {
+		t.Fatal("缺少安全的健康告警或子进程结果")
+	}
+	for i, ok := range observed {
+		if !ok {
+			t.Errorf("子进程环境检查 %d 失败", i)
+		}
 	}
 }

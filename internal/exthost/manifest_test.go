@@ -71,6 +71,19 @@ func TestManifest(t *testing.T) {
 	}
 }
 
+func TestManifestEnvironment(t *testing.T) {
+	for _, extra := range []string{
+		`"env":["A-B"]`, `"env":["A","A"]`, `"credentials":[{"name":"a","env":"1A"}]`,
+		`"credentials":[{"name":"a/b","env":"A"}]`, `"credentials":[{"name":"a","env":"A"},{"name":"a","env":"B"}]`,
+		`"credentials":[{"name":"a","env":"A"},{"name":"b","env":"A"}]`,
+	} {
+		path := putManifest(t, t.TempDir(), "demo", manifestText("demo", ","+extra))
+		if _, err := loadManifest(path); err == nil {
+			t.Errorf("接受了无效声明 %s", extra)
+		}
+	}
+}
+
 func TestRejectManifest(t *testing.T) {
 	for _, tc := range []struct{ field, from, to string }{
 		{"id", `"id":"demo"`, `"id":""`},
