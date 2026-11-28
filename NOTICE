@@ -1,3 +1,33 @@
 # 第三方声明
 
-- Watch 引擎的机制与行为用例参考了一个 MIT 许可的原型项目；移植的代码或用例保留其版权声明与许可文本（待 M3 移植时补全）。
+## 引擎原型
+
+craft 的 Watch 引擎（事件、Thread、Work、研判与派工的机制，以及部分行为用例）移植自下列 MIT 许可的开源原型。移植的代码与用例保留其版权声明与许可文本。
+
+- 项目：deepseek-ai/dsh-superagent-prototype
+- 版权：Copyright (c) 2026 DeepSeek Harness Team
+- 许可：MIT
+
+```
+MIT License
+
+Copyright (c) 2026 DeepSeek Harness Team
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

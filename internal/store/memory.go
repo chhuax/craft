@@ -96,7 +96,7 @@ func (tx *memoryTx) Atomic(ctx context.Context, fn func(Tx) error) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("开始内存快照: %w", err)
 	}
-	child := memoryTx{memoryRead: tx.memoryRead.clone()}
+	child := memoryTx{memoryRead: tx.clone()}
 	if err := fn(&child); err != nil {
 		return fmt.Errorf("执行内存快照事务: %w", err)
 	}

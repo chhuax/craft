@@ -49,7 +49,7 @@ func (s *SQLite) Atomic(ctx context.Context, fn func(Tx) error) error {
 	if err != nil {
 		return err
 	}
-	write.callbacks.run(s.logger)
+	write.run(s.logger)
 	return nil
 }
 
