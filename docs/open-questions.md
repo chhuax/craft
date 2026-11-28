@@ -27,3 +27,4 @@
 | Q11 | 扩展分发与签名：registry？还是纯本地目录安装 | v1 纯本地目录，不做 registry |
 | Q13 | 知识沉淀（knowledge）是否进开源范围；craft 的知识源端口默认实现只读仓库内文档 | 不进 v1，作为扩展另行决定 |
 | Q16 | `attention()` 的 `suggestion` 与 `health` 两类：数据不在 Work/Thread/Decision 里（健康来自 effect 层与扩展的健康上报，建议来自盘点），M3a 的纯函数只产出能从引擎状态推导的六类。做法倾向：这两类由 app 层产出同一 `AttentionItem` 类型，与引擎结果合并排序，`attention()` 保持纯函数 | M3d（effect 健康）时补合并函数；`suggestion` 随盘点放 v1.1 |
+| Q17 | `Work.inputs` 没有上限：Work 是整份 JSON 文档，`Report`、`Answer` 等命令每次都要整份解码与编码（内存仓储实测目标 Work 有 500 条历史 inputs 时约 0.7 ms、3600 次分配，而只动投递窗口的 `InputsDelivered` 约 24 µs）。长寿命的 Work 会让这类命令随时间变慢。方向：对已读且已过保留期的 inputs 做裁剪或归档（可与 `prune` 一并做），或把 inputs 拆成单独集合；并给聚合大小设上限（ADR 0003 已有此约束但未落实） | M3d 之后、v0.1 之前定；先在 SQLite 上实测 5000 条 inputs 的开销再决定拆还是裁 |
