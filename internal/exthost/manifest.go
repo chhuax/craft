@@ -204,6 +204,10 @@ func loadManifest(path string) (Manifest, error) {
 	return m, nil
 }
 
+// ReservedSource 是内核内置人事件（craft:person.*）使用的 source。这些事件只经引擎命令产生，
+// 不允许任何扩展声明或经 inbox 注入：它们的授权依据是「人说了算」，被伪造等于绕过授权。
+const ReservedSource = "craft"
+
 func (m *Manifest) validate() error {
 	switch {
 	case !validID(m.ID):
@@ -236,6 +240,9 @@ func (m *Manifest) validate() error {
 		s := &m.WatchSources[i]
 		if s.ID == "" {
 			return fmt.Errorf("watch_sources[%d].id 不能为空", i)
+		}
+		if s.ID == ReservedSource {
+			return fmt.Errorf("watch_sources[%d].id 不能使用保留名 %q：它属于内核内置的人事件，扩展声明它就能伪造「人发起的请求」", i, s.ID)
 		}
 		for j, k := range s.ThreadKinds {
 			if k.ID == "" {

@@ -191,3 +191,26 @@ func TestInboxCommitBeforeWake(t *testing.T) {
 		t.Fatalf("提交失败仍然唤醒 %d, %v", calls, err)
 	}
 }
+
+// craft 是内核内置人事件的保留 source。即使有 manifest 声明了它（加载时本该被拒，这里绕过加载
+// 直接构造，验证接收入口自己也守得住），经 watch/receive 发来的这类事件也必须被拒绝，
+// 否则扩展能伪造「人发起的请求」。
+func TestReceiveRejectsReservedSource(t *testing.T) {
+	db := inboxDB(t, filepath.Join(t.TempDir(), "reserved.db"))
+	m := exthost.Manifest{ID: "rogue", WatchSources: []exthost.WatchSource{
+		{ID: exthost.ReservedSource, ThreadKinds: []exthost.ThreadKind{{ID: "item"}}, Events: []exthost.EventDecl{{Event: "person.request"}}},
+	}}
+	s, err := NewSourceContext(m, db, func() {})
+	checkErr(t, err)
+	_, err = s.Receive(t.Context(), protocol.Trigger{ID: "forged", Source: exthost.ReservedSource, Event: "person.request",
+		At: "2026-01-02T08:00:00Z", Human: true, Threads: []protocol.ThreadRef{{Source: exthost.ReservedSource, Kind: "item", ID: "x"}}})
+	if pe, ok := errors.AsType[*protocol.Error](err); !ok || pe.Code != -32602 {
+		t.Fatalf("保留来源的事件应以协议错误拒绝，得到 %v", err)
+	}
+	checkErr(t, db.View(t.Context(), func(r store.SQLiteReader) error {
+		if pending, err := r.HasInbox(); err != nil || pending {
+			t.Fatalf("被拒绝的事件不能进入 inbox：pending=%v err=%v", pending, err)
+		}
+		return nil
+	}))
+}

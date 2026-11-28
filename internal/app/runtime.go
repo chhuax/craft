@@ -11,14 +11,7 @@ import (
 	"github.com/chhuax/craft/internal/store"
 )
 
-// EffectLayer 由 Start 和 Stop 显式管理生命周期，两者的 ctx 只控制该次调用。
-// Kick 只能非阻塞地通知执行层，耗时的执行不能占用 Pass。
-type EffectLayer interface {
-	Start(context.Context) error
-	Kick()
-	Stop(context.Context) error
-}
-
+// noopEffects 是没有注册任何处理器时的 EffectLayer（接口见 effects_scheduler.go）。
 type noopEffects struct{}
 
 func (noopEffects) Start(context.Context) error { return nil }

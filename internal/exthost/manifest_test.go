@@ -97,6 +97,7 @@ func TestRejectManifest(t *testing.T) {
 		{"no_target", "scratch", "other"},
 		{"group", `"group":"g"`, `"group":""`},
 		{"by", `"by":"k"`, `"by":3`},
+		{"保留名", `"id":"src"`, `"id":"craft"`},
 	} {
 		t.Run(tc.field, func(t *testing.T) {
 			data := manifestText("demo", `,"alarms":[{"id":"a","every":"1m"}],"alarm_limits":{"concurrency":1},"watch_sources":[{"id":"src","events":[{"id":"e","default":"observe","strength":"inferred","on_unmatched":"filter","feed_tier":"digest","verb":"处理","no_target":"scratch","collapse":{"group":"g","by":"k"}}]}]`)

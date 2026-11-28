@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chhuax/craft/internal/engine"
+	"github.com/chhuax/craft/internal/exthost"
 	"github.com/chhuax/craft/internal/store"
 )
 
@@ -116,7 +117,7 @@ func (r *Runtime) consume(ctx context.Context, tx *store.SQLiteTx, row store.Inb
 	if err := json.Unmarshal(row.Value, &tr); err != nil {
 		return fmt.Errorf("%w: %w", errPoison, err)
 	}
-	if tr.ID == "" || tr.ID != row.ID || tr.At != row.At || len(tr.Threads) == 0 || (tr.Source == "craft" && tr.Event == "person.answer") {
+	if tr.ID == "" || tr.ID != row.ID || tr.At != row.At || len(tr.Threads) == 0 || tr.Source == exthost.ReservedSource {
 		return fmt.Errorf("%w: 事件标识、时间、类型或主对象无效", errPoison)
 	}
 	if _, err := engine.IsoTime(tr.At); err != nil {

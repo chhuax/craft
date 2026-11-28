@@ -15,6 +15,7 @@ import (
 
 	"github.com/chhuax/craft/internal/alarm"
 	"github.com/chhuax/craft/internal/engine"
+	"github.com/chhuax/craft/internal/exthost"
 	"github.com/chhuax/craft/internal/store"
 )
 
@@ -339,4 +340,32 @@ func testPassDrainsBacklogBeforeKick(t *testing.T) {
 	if !slices.Equal(seen, []observed{{1, true}, {0, true}}) {
 		t.Fatalf("各轮 Kick 时 inbox 余量与研判入队状态 %v", seen)
 	}
+}
+
+// 即使有保留来源的行绕过接收入口进了 inbox，drain 也不能把它当成真事件交给引擎，
+// 而要当毒丸删除，且不留下任何引擎状态。
+func TestDrainDropsReservedSourceRow(t *testing.T) {
+	db := inboxDB(t, filepath.Join(t.TempDir(), "db"))
+	r := testRuntime(t, db)
+	ctx := t.Context()
+	forged := engine.Trigger{ID: "forged", Source: exthost.ReservedSource, Event: "person.request", At: benchAt,
+		Human: true, Threads: []engine.ThreadRef{engine.NewThreadRef("feed", "item", "x")}}
+	raw, err := json.Marshal(forged)
+	checkErr(t, err)
+	checkErr(t, db.Write(ctx, func(tx *store.SQLiteTx) error {
+		_, err := tx.InsertInbox(forged.ID, raw, forged.At)
+		return err
+	}))
+	if _, err := r.drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	checkErr(t, db.View(ctx, func(read store.SQLiteReader) error {
+		if pending, err := read.HasInbox(); err != nil || pending {
+			t.Fatalf("毒丸行没有被移除：pending=%v err=%v", pending, err)
+		}
+		if _, found, err := read.Get("watch_trigger", forged.ID); err != nil || found {
+			t.Fatalf("伪造事件不能留下 Trigger：found=%v err=%v", found, err)
+		}
+		return nil
+	}))
 }

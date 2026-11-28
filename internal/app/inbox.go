@@ -82,6 +82,8 @@ func (s *SourceContext) normalize(p protocol.Trigger) (engine.Trigger, error) {
 	switch {
 	case p.ID == "":
 		return tr, fmt.Errorf("缺少事件 ID")
+	case p.Source == exthost.ReservedSource:
+		return tr, fmt.Errorf("来源 %q 是内核保留名，扩展不能发这类事件", p.Source)
 	case !s.events[[2]string{p.Source, p.Event}]:
 		return tr, fmt.Errorf("未声明的来源或事件 %q/%q", p.Source, p.Event)
 	case len(p.Threads) == 0:
