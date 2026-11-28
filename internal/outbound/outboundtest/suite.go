@@ -163,7 +163,7 @@ func pending(t *testing.T, box outbound.Outbox) {
 		t.Fatalf("外发记录 %+v, %v", all, err)
 	}
 	r, err := s.Show(ctx, "x")
-	if err != nil || r.Source != outbound.Worker || r.State != outbound.Done || len(r.Receipt) == 0 {
+	if err != nil || r.Source != outbound.Worker || r.State != outbound.Done || r.SentSeq <= 0 || len(r.Receipt) == 0 {
 		t.Fatalf("持久回执 %+v, %v", r, err)
 	}
 }

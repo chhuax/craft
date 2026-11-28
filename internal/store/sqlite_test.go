@@ -111,7 +111,7 @@ func TestSchemaV1(t *testing.T) {
 		"watch_effect":         {"kind", "key", "value", "seq", "generation", "attempts", "error", "due", "since", "failure_order"},
 		"document_count":       {"name", "total"},
 		"effect_count":         {"kind", "waiting"},
-		"outbox":               {"key", "value", "state", "auto_at"},
+		"outbox":               {"key", "value", "state", "auto_at", "extension", "sent_seq"},
 		"alarm_state":          {"key", "value"},
 		"ext_state":            {"namespace", "key", "value"},
 		"watch_alarm_request":  {"ordinal", "key", "value", "status"},

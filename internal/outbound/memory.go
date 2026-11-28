@@ -9,8 +9,9 @@ import (
 )
 
 type memory struct {
-	mu   sync.Mutex
-	rows map[string]Result
+	mu      sync.Mutex
+	rows    map[string]Result
+	sentSeq int64
 }
 
 // NewMemory 提供与持久仓储相同的原子状态转移，供独立运行和契约测试使用。
@@ -69,6 +70,10 @@ func (m *memory) Save(ctx context.Context, r *Result, rate RateLimit, clock func
 				}
 			}
 		}
+	}
+	if r.State == Done {
+		m.sentSeq++
+		r.SentSeq = m.sentSeq
 	}
 	m.rows[r.ID] = clone(*r)
 	return nil

@@ -22,6 +22,7 @@ func TestLookupPlans(t *testing.T) {
 		"sessionWorks": {"work_session"}, "decisionPage": {"sqlite_autoindex_watch_decision_1"},
 		"requests": {"INDEX alarm_request_status"}, "subscribed": {"INDEX thread_subscribed", "INDEX sqlite_autoindex_watch_work_1"},
 		"stateGet": {"PRIMARY KEY"}, "stateKeys": {"PRIMARY KEY"},
+		"outboxList": {"INDEX sqlite_autoindex_outbox_1"}, "outboxReceipts": {"INDEX outbox_receipts"}, "outboxCounts": {"INDEX outbox_state"},
 		"outboxState": {"INDEX outbox_state"}, "autoWindow": {"INDEX outbox_auto_at"},
 		"pending": {"INDEX thread_pending"}, "evaluating": {"INDEX thread_eval"}, "eval": {"INDEX thread_eval"},
 		"open": {"INDEX watch_work_active"}, "recent": {"INDEX work_recent"}, "origin": {"INDEX work_origin"},

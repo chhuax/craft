@@ -6,14 +6,19 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/chhuax/craft/internal/engine"
 	"github.com/chhuax/craft/internal/outbound"
 	"github.com/chhuax/craft/internal/store"
 )
 
-type sqliteOutbox struct{ db *store.SQLite }
+type sqliteOutbox struct {
+	db     *store.SQLite
+	repo   *engineStore
+	health *daemonHealth
+}
 
 // NewSQLiteOutbox 将已有文件库适配为外发仓储；其连接仍由调用方关闭。
-func NewSQLiteOutbox(db *store.SQLite) outbound.Outbox { return sqliteOutbox{db} }
+func NewSQLiteOutbox(db *store.SQLite) outbound.Outbox { return sqliteOutbox{db: db} }
 
 func outboxRow(tx store.ReadTx, id string) (outbound.Result, error) {
 	raw, ok, err := tx.Get("outbox", id)
@@ -39,40 +44,37 @@ func (s sqliteOutbox) Get(ctx context.Context, id string) (r outbound.Result, er
 func (s sqliteOutbox) Records(ctx context.Context, state outbound.State) ([]outbound.Result, error) {
 	var result []outbound.Result
 	err := s.db.View(ctx, func(tx store.SQLiteReader) error {
-		var docs []store.Doc
-		if state != "" {
-			rows, err := tx.Lookup("outboxState", string(state))
-			if err != nil {
-				return err
-			}
-			docs = rows
-		} else {
-			all, err := tx.List("outbox", store.All)
-			if err != nil {
-				return err
-			}
-			for key, raw := range all {
-				docs = append(docs, store.Doc{Key: key, Value: raw})
-			}
-		}
-		for _, doc := range docs {
-			var r outbound.Result
-			if err := json.Unmarshal(doc.Value, &r); err != nil {
-				return fmt.Errorf("解码外发记录 %q: %w", doc.Key, err)
-			}
-			result = append(result, r)
-		}
-		return nil
+		var err error
+		result, err = outboxRecords(tx, state)
+		return err
 	})
 	return result, err
 }
 
+func outboxRecords(tx store.SQLiteReader, state outbound.State) ([]outbound.Result, error) {
+	name := "outboxList"
+	var args []any
+	if state != "" {
+		name, args = "outboxState", []any{string(state)}
+	}
+	docs, err := tx.Lookup(name, args...)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]outbound.Result, len(docs))
+	err = decodeDocs(docs, func(i int) any { return &result[i] })
+	return result, err
+}
+
 func (s sqliteOutbox) Save(ctx context.Context, r *outbound.Result, rate outbound.RateLimit, clock func() time.Time) error {
-	return s.db.Write(ctx, func(tx *store.SQLiteTx) error {
+	var from outbound.State
+	changed := false
+	return s.db.WriteAndPublish(ctx, func(tx *store.SQLiteTx) error {
 		current, err := outboxRow(tx, r.ID)
 		if err != nil {
 			return err
 		}
+		from = current.State
 		if err := current.PrepareTransition(r, rate, clock()); err != nil {
 			return err
 		}
@@ -86,10 +88,30 @@ func (s sqliteOutbox) Save(ctx context.Context, r *outbound.Result, rate outboun
 				return outbound.ErrRateLimited
 			}
 		}
+		if r.State == outbound.Done {
+			// 在完成事务分配序号；首次建单顺序和墙钟都不能用作回执游标。
+			r.SentSeq, err = tx.NextCounter("outbox.sentSeq")
+			if err != nil {
+				return err
+			}
+		}
+		if s.repo != nil && (from == outbound.Pending || r.State == outbound.Pending) {
+			if err := s.repo.in(ctx, tx).Emit(engine.Event{Type: "outbox.changed", At: r.At.UTC().Format(utcMillis), Ref: map[string]string{"outbox": r.ID}}); err != nil {
+				return err
+			}
+		}
+		if s.health != nil {
+			tx.AfterCommit(func() { s.health.notify(changed) })
+		}
 		raw, err := json.Marshal(r)
 		if err != nil {
 			return fmt.Errorf("编码外发记录 %q: %w", r.ID, err)
 		}
 		return tx.Put("outbox", r.ID, raw)
+	}, func() {
+		// 同一写连接按提交顺序发布计数，避免并发恢复或确认产生过期快照。
+		if s.health != nil {
+			changed = s.health.outboxChange(from, r.State, 1)
+		}
 	})
 }

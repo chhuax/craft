@@ -3,6 +3,8 @@ package app
 import (
 	"maps"
 	"sync"
+
+	"github.com/chhuax/craft/internal/outbound"
 )
 
 // HealthEntry 保存最近一次状态及原因。扩展上报的条目按扩展 ID 单独保存。
@@ -13,6 +15,7 @@ type HealthEntry struct {
 
 // DaemonHealth 是独立的只读快照；被拒绝的 manifest 按路径区分重名扩展。
 type DaemonHealth struct {
+	Outbox     OutboxCounts                      `json:"outbox"`
 	Extensions map[string]HealthEntry            `json:"extensions"`
 	Rejected   map[string]HealthEntry            `json:"rejected"`
 	Reports    map[string]map[string]HealthEntry `json:"reports"`
@@ -85,4 +88,31 @@ func (h *daemonHealth) effect(kind string, state HealthState) {
 	h.state.Effects[kind] = state
 	h.mu.Unlock()
 	h.notify(state != old)
+}
+
+// OutboxCounts 汇总需要人工处理或核实的外发状态。
+type OutboxCounts struct {
+	Pending   int `json:"pending"`
+	Executing int `json:"executing"`
+	Unknown   int `json:"unknown"`
+}
+
+func (c *OutboxCounts) add(state outbound.State, n int) {
+	switch state {
+	case outbound.Pending:
+		c.Pending += n
+	case outbound.Executing:
+		c.Executing += n
+	case outbound.Unknown:
+		c.Unknown += n
+	}
+}
+
+func (h *daemonHealth) outboxChange(from, to outbound.State, n int) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	prev := h.state.Outbox
+	h.state.Outbox.add(from, -n)
+	h.state.Outbox.add(to, n)
+	return prev != h.state.Outbox
 }

@@ -1,12 +1,14 @@
 package app
 
 import (
+	"cmp"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/chhuax/craft/internal/engine"
+	"github.com/chhuax/craft/internal/outbound"
 )
 
 // Status 是同一快照内的精确计数，包含已结束的对象。
@@ -75,7 +77,26 @@ func (r CommandReader) Attention() ([]engine.AttentionItem, error) {
 		set.Threads = append(set.Threads, *t)
 		set.Decisions = append(set.Decisions, history...)
 	}
-	return engine.Attention(set), nil
+	rows, err := outboxRecords(*r.read, outbound.Pending)
+	if err != nil {
+		return nil, err
+	}
+	return mergeAttention(engine.Attention(set), outbound.PendingConfirmations(rows)), nil
+}
+
+func mergeAttention(items []engine.AttentionItem, pending []outbound.Confirmation) []engine.AttentionItem {
+	if len(pending) == 0 {
+		return items
+	}
+	items = slices.Grow(items, len(pending))
+	for _, p := range pending {
+		items = append(items, engine.AttentionItem{ID: engine.Key("attention", "confirm", p.ID), Kind: "confirm", Severity: "action",
+			Ref: engine.AttentionRef{Attention: p.ID}, Title: p.Action, Detail: p.Preview, Actions: []string{"confirm", "withdraw"}, At: p.At.UTC().Format(utcMillis)})
+	}
+	slices.SortStableFunc(items, func(a, b engine.AttentionItem) int {
+		return cmp.Or(cmp.Compare(a.Severity, b.Severity), cmp.Compare(b.At, a.At), cmp.Compare(a.ID, b.ID))
+	})
+	return items
 }
 
 // WorkPage 按键升序取一页，按对象筛选时合并起源和现有订阅。

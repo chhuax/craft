@@ -42,7 +42,11 @@ var lookups = map[string]string{
 		AND (coalesce(nullif(t.value->>'$.lastAt',''),t.value->>'$.createdAt')>=?3 OR EXISTS (
 			SELECT 1 FROM json_each(t.value,'$.subscriptions') s CROSS JOIN watch_work w
 			WHERE w.key=s.value AND (w.ended IS NULL OR w.value->>'$.ended.at'>=?3))) ORDER BY t.key`,
-	"outboxState": "SELECT key,value FROM outbox WHERE state=? ORDER BY key",
+	"outboxList": "SELECT key,value FROM outbox WHERE key>'' ORDER BY key",
+	"outboxReceipts": `SELECT key,json_object('id',key,'action',value->>'$.action','sentSeq',sent_seq,'receipt',value->'$.receipt') FROM outbox
+		WHERE state='done' AND extension=? AND sent_seq>? ORDER BY sent_seq LIMIT ?`,
+	"outboxCounts": `SELECT state,count(*) FROM outbox WHERE state IN ('pending','executing','unknown') GROUP BY state`,
+	"outboxState":  "SELECT key,value FROM outbox WHERE state=? ORDER BY key",
 	// 只数到上限，窗口内历史记录再多也不影响准入成本。
 	"autoWindow": "SELECT key,NULL FROM outbox WHERE auto_at>? AND auto_at<=? LIMIT 1 OFFSET ?",
 	"pending":    "SELECT key,value FROM watch_thread WHERE closed IS NULL AND ready=1 ORDER BY ordinal",

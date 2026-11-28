@@ -3,6 +3,7 @@ package outbound
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
@@ -19,7 +20,7 @@ func (s *Service) Show(ctx context.Context, id string) (Result, error) {
 		return Result{}, fmt.Errorf("读取外发记录 %q: %w", id, err)
 	}
 	if r.ID == "" {
-		return Result{}, fmt.Errorf("外发记录 %q 不存在", id)
+		return Result{}, fmt.Errorf("%q: %w", id, ErrMissing)
 	}
 	return r, nil
 }
@@ -49,23 +50,37 @@ func (s *Service) PendingConfirmations(ctx context.Context) ([]Confirmation, err
 	if err != nil {
 		return nil, err
 	}
+	return PendingConfirmations(rows), nil
+}
+
+// PendingConfirmations 将已按 pending 筛选的记录投影为待办，供应用在同一读快照内合并。
+func PendingConfirmations(rows []Result) []Confirmation {
 	items := make([]Confirmation, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, Confirmation{r.ID, r.Action, r.Preview.Summary, r.Source, r.At})
 	}
-	return items, nil
+	return items
 }
 
 // Confirm 由显式确认操作调用，每次只处理一条待办并重新预览其原始请求。
 func (s *Service) Confirm(ctx context.Context, id, named string) (Result, error) {
+	return s.confirm(ctx, id, true, named)
+}
+
+// PreviewConfirmation 重新预览待办，同时重查现行规则；只有 Confirm 可以批准执行。
+func (s *Service) PreviewConfirmation(ctx context.Context, id string) (Result, error) {
+	return s.confirm(ctx, id, false, "")
+}
+
+func (s *Service) confirm(ctx context.Context, id string, yes bool, named string) (Result, error) {
 	r, err := s.Show(ctx, id)
 	if err != nil {
-		return Result{}, err
+		return r, err
 	}
 	if r.State != Pending {
 		return r, fmt.Errorf("外发记录 %q 不在待确认清单中: %w", id, ErrConflict)
 	}
-	return s.preview(ctx, r, s.action(r.Action), true, named)
+	return s.preview(ctx, r, s.action(r.Action), yes, named)
 }
 
 // Withdraw 只允许撤回仍待确认的记录，同时进行的确认由仓储前态检查裁决。
@@ -93,7 +108,16 @@ func (s *Service) Recover(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return errors.Join(append(failures, ctx.Err())...)
 		}
-		status, receipt, verifyErr := s.ext.Verify(ctx, protocol.ActionVerifyParams{Action: r.Action, IdempotencyKey: r.ID})
+		owner := s.action(r.Action).Extension
+		var status Verification
+		var receipt json.RawMessage
+		var verifyErr error
+		if r.Extension != "" && r.Extension != owner {
+			verifyErr = fmt.Errorf("动作 %q 原登记扩展 %q 已不可用", r.Action, r.Extension)
+		} else {
+			r.Extension = owner
+			status, receipt, verifyErr = s.ext.Verify(ctx, protocol.ActionVerifyParams{Action: r.Action, IdempotencyKey: r.ID})
+		}
 		next := Unknown
 		if verifyErr == nil && receipt != nil && !jsontext.Value(receipt).IsValid() {
 			verifyErr = errors.New("扩展的核实回执不是有效 JSON")

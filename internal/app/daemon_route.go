@@ -35,7 +35,7 @@ func newExtensionHandler(m exthost.Manifest, r *Runtime, health *daemonHealth) (
 		"watch/receive": h.receive, "thread/describe": h.describe, "thread/patch": h.patch,
 		"thread/closed": h.closed, "thread/reopened": h.reopened, "work/bindThread": h.bind,
 		"thread/get": h.get, "thread/subscribed": h.subscribed, "work/open": h.open,
-		"state/get": h.stateGet, "state/set": h.stateSet, "state/keys": h.stateKeys, "health/report": h.report,
+		"receipts/recent": h.recentReceipts, "state/get": h.stateGet, "state/set": h.stateSet, "state/keys": h.stateKeys, "health/report": h.report,
 	}
 	return func(ctx context.Context, method string, raw json.RawMessage) (any, error) {
 		f := routes[method]

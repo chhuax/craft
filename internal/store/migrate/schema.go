@@ -28,7 +28,7 @@ type CollectionSpec struct {
 }
 
 var collections = []CollectionSpec{
-	{Name: "outbox", Table: "outbox", columns: `, state TEXT AS (value->>'$.state'), auto_at INTEGER AS (value->>'$.autoAt')`},
+	{Name: "outbox", Table: "outbox", columns: `, state TEXT AS (value->>'$.state'), auto_at INTEGER AS (value->>'$.autoAt'), extension TEXT AS (value->>'$.extension'), sent_seq INTEGER AS (value->>'$.sentSeq')`},
 	{Name: "watch_alarm_request", Table: "watch_alarm_request", ordered: true, columns: `, status TEXT AS (value->>'$.status')`},
 	{Name: "watch_trigger", Table: "watch_trigger", columns: `, primary_thread TEXT AS (
       json_extract(value,'$.threads[0].source') || ':' || json_extract(value,'$.threads[0].kind') || ':' || json_extract(value,'$.threads[0].id'))`},

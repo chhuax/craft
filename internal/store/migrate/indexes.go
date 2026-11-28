@@ -24,6 +24,7 @@ func createIndexes(tx *sql.Tx) error {
 		"CREATE INDEX decision_observed ON watch_decision(key) WHERE value->>'$.audit.would_accept'=1",
 		"CREATE INDEX alarm_request_status ON watch_alarm_request(status,ordinal)",
 		"CREATE INDEX thread_subscribed ON watch_thread(key) WHERE json_array_length(value,'$.subscriptions')>0",
+		"CREATE INDEX outbox_receipts ON outbox(extension,sent_seq) WHERE state='done'",
 		"CREATE INDEX outbox_state ON outbox(state,key)",
 		"CREATE INDEX outbox_auto_at ON outbox(auto_at) WHERE auto_at IS NOT NULL",
 		"CREATE INDEX thread_pending ON watch_thread(closed,ordinal) WHERE closed IS NULL AND ready=1",

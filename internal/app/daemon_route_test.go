@@ -25,6 +25,7 @@ func TestDaemonExtensionWrites(t *testing.T) {
 		{"thread/describe", `{"key":"foreign:item:x"}`}, {"thread/describe", `{"key":"feed:item:x","ref":{"source":"foreign","kind":"item","id":"x"}}`},
 		{"thread/patch", `{"key":"foreign:item:x","meta":{}}`}, {"thread/closed", `{"thread":{"source":"foreign","kind":"item","id":"x"},"at":"2026-01-01T00:00:00Z","outcome":"done"}`},
 		{"thread/reopened", `{"thread":{"source":"foreign","kind":"item","id":"x"},"at":"2026-01-01T00:00:00Z"}`}, {"work/bindThread", `{"workId":"w","thread":{"source":"feed","kind":"item:x","id":"y"},"own":true}`},
+		{"receipts/recent", `{}`}, {"receipts/recent", `{"limit":2,"afterSentSeq":-1}`},
 		{"health/report", `{"entry":"e","state":"ready"}`}, {"thread/closed", `{"thread":{"source":"feed","kind":"item","id":"x"},"outcome":"other"}`},
 	} {
 		_, err := h(ctx, tc.method, []byte(tc.params))
@@ -37,7 +38,7 @@ func TestDaemonExtensionWrites(t *testing.T) {
 		t.Fatal("被拒绝的请求唤醒了 Pass")
 	default:
 	}
-	_, err = h(ctx, "receipts/recent", nil)
+	_, err = h(ctx, "unknown", nil)
 	if !errors.Is(err, exthost.ErrMethodNotFound) {
 		t.Fatal(err)
 	}

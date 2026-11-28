@@ -13,6 +13,7 @@ import (
 
 	"github.com/chhuax/craft/internal/alarm"
 	"github.com/chhuax/craft/internal/exthost"
+	"github.com/chhuax/craft/internal/outbound"
 	"github.com/chhuax/craft/internal/store"
 )
 
@@ -49,6 +50,7 @@ type Daemon struct {
 	order              []string
 	alarms             *alarm.Service
 	queue              *alarmQueue
+	outbound           *outbound.Service
 
 	mu      sync.Mutex
 	started bool
@@ -142,6 +144,15 @@ func (d *Daemon) start(ctx, run context.Context) error {
 			return err
 		}
 	}
+	// 只有取得单实例锁且所有扩展完成首轮握手后，才能核实上一代的发送。
+	if d.Health().Outbox.Executing > 0 {
+		if err := d.outbound.Recover(ctx); err != nil {
+			if ctx.Err() != nil || d.Health().Outbox.Executing != 0 {
+				return fmt.Errorf("恢复外发记录: %w", err)
+			}
+			d.cfg.Logger.Warn("部分外发结果无法核实", "error", err)
+		}
+	}
 	if err := d.startAlarms(ctx, extensions); err != nil {
 		return err
 	}
@@ -166,6 +177,9 @@ func (d *Daemon) startRuntime(ctx context.Context, extensions []exthost.Extensio
 	}
 	d.runtime.effects = effects
 	d.runtime.repo.onEvent = d.cfg.OnEvent
+	if err := d.startOutbound(ctx, extensions); err != nil {
+		return err
+	}
 	// 启动调用者可在成功后释放 ctx。执行池一直保留到 Pass 退出之后。
 	if err := ctx.Err(); err != nil {
 		return err

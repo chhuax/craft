@@ -7,6 +7,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 // Config 由应用层提供动作目录、组织下限、窗口和时钟。Content 为 nil 时采用内置规则。
 type Config struct {
+	Logger       *slog.Logger
 	Actions      []Action
 	Organization map[string]Level
 	Outbox       Outbox
@@ -67,7 +69,11 @@ func New(cfg Config) (*Service, error) {
 			return nil, fmt.Errorf("动作 %q 的组织级别无效 %q", id, level)
 		}
 		a := s.action(id)
-		a.Level = stricter(a.Level, level)
+		effective := stricter(a.Level, level)
+		if effective != level && cfg.Logger != nil {
+			cfg.Logger.Warn("已忽略放宽外发等级的组织规则", "action", id, "declared", a.Level, "rule", level)
+		}
+		a.Level = effective
 		s.actions[id] = a
 	}
 	return s, nil
@@ -107,7 +113,7 @@ func (s *Service) Act(ctx context.Context, q Request) (Result, error) {
 		return Result{}, fmt.Errorf("查找幂等键 %q: %w", q.IdempotencyKey, err)
 	}
 	if r.ID == "" {
-		r = Result{ID: q.IdempotencyKey, Action: q.Action, Params: q.Params, Source: q.Source, Level: a.Level, Reversible: a.Reversible}
+		r = Result{Extension: a.Extension, ID: q.IdempotencyKey, Action: q.Action, Params: q.Params, Source: q.Source, Level: a.Level, Reversible: a.Reversible}
 		r, err = s.move(ctx, r, Previewing)
 		if errors.Is(err, ErrConflict) {
 			// 同键并发首次提交时，输掉插入的一方必须按已提交的身份和状态处理。
@@ -141,6 +147,12 @@ func sameParams(a, b json.RawMessage) bool {
 }
 
 func (s *Service) preview(ctx context.Context, r Result, a Action, yes bool, named string) (Result, error) {
+	if r.Extension != "" && a.Extension != "" && r.Extension != a.Extension {
+		return r, fmt.Errorf("动作 %q 的登记归属已变化: %w", r.Action, ErrConflict)
+	}
+	if a.Extension != "" {
+		r.Extension = a.Extension
+	}
 	// 已因内容或窗口转入确认的记录，即使窗口滑过也不能被无确认的重放发出。
 	r.Level = stricter(r.Level, a.Level)
 	if r.Level == Deny {

@@ -23,6 +23,9 @@ type AlarmRunParams struct {
 	ScheduledAtMs int64  `json:"scheduledAtMs"`
 }
 
+// ActionDenied 表示扩展在执行入口明确拒绝，保证没有产生外部效果。
+const ActionDenied = -32007
+
 // ActionExecuteParams 将动作参数原样交给扩展，预览和执行均携带幂等键。
 type ActionExecuteParams struct {
 	Action         string          `json:"action"`

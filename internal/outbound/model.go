@@ -32,6 +32,7 @@ func stricter(base, rule Level) Level {
 
 // Action 对应 manifest.actions 的单项，只有显式登记的只读动作可直接转发。
 type Action struct {
+	Extension  string `json:"-"`
 	ID         string `json:"id"`
 	Level      Level  `json:"level"`
 	Reversible bool   `json:"reversible"`
@@ -103,6 +104,8 @@ const NeedsConfirmation = decisionError("needs_confirmation")
 var (
 	// ErrDenied 对应退出码 4，也可由扩展在重查时报告硬拒绝。
 	ErrDenied = errors.New("外发被拒绝")
+	// ErrMissing 表示按幂等键查找时没有这条记录。
+	ErrMissing = errors.New("外发记录不存在")
 	// ErrConflict 表示记录前态已改变或操作不适用于当前状态。
 	ErrConflict = errors.New("外发记录状态冲突")
 	// ErrRateLimited 由仓储在自动发送名额用尽时返回，入口据此转入确认。
@@ -148,6 +151,9 @@ func (r Result) PrepareTransition(value *Result, limit RateLimit, at time.Time) 
 
 // Result 同时是 outbox 文档。ID 即幂等键；终态和回执随整份文档原子提交。
 type Result struct {
+	// 保存登记时的归属，避免扩展换代后把核实或回执交给新的动作所有者。
+	Extension  string          `json:"extension,omitempty"`
+	SentSeq    int64           `json:"sentSeq,omitzero"`
 	Revision   int64           `json:"revision"`
 	ID         string          `json:"id"`
 	Action     string          `json:"action"`
@@ -175,7 +181,7 @@ func (l RateLimit) valid() bool {
 }
 
 // Outbox 的 Save 在同一短事务内比对前态、检查转移并保存整份文档。
-// 进入自动执行时还须在该事务中读时钟、检查窗口并占位；成功后传回落盘时刻。
+// 进入自动执行时还须在该事务中读时钟、检查窗口并占位；完成时分配单调的 SentSeq。
 // Get 用空 ID 表示缺失，Records 的空状态表示全部，读取结果归调用方所有。
 type Outbox interface {
 	Get(context.Context, string) (Result, error)
