@@ -29,6 +29,28 @@ func openTestDB(t testing.TB, path string) *SQLite {
 	return s
 }
 
+// TestOpenExistingSQLiteSkipsMissingAndEmpty 覆盖只读检查后原库被移走或替换的情形。
+func TestOpenExistingSQLiteSkipsMissingAndEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "craft.db")
+	tryOpen := func() {
+		t.Helper()
+		if db, err := OpenExistingSQLite(t.Context(), path); err == nil {
+			t.Fatalf("意外打开了未初始化的库，关闭结果 %v", db.Close())
+		}
+	}
+	tryOpen()
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("意外创建了状态库: %v", err)
+	}
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	tryOpen()
+	if raw, err := os.ReadFile(path); err != nil || len(raw) != 0 {
+		t.Fatalf("空文件被初始化，大小 %d: %v", len(raw), err)
+	}
+}
+
 // TestPutManySQLiteJSON 验证数据库拒绝文档时，外层事务仍能提交先前的修改。
 func TestPutManySQLiteJSON(t *testing.T) {
 	s := openTestDB(t, filepath.Join(t.TempDir(), "depth.db"))

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/chhuax/craft/internal/app"
 	"github.com/chhuax/craft/internal/engine"
 	"github.com/chhuax/craft/internal/host"
+	"github.com/chhuax/craft/internal/store"
 )
 
 const hookInput = `{"session_id":"host-session","cwd":"somewhere","source":"startup","hook_event_name":"SessionStart","future":"私有输入"}`
@@ -213,4 +215,207 @@ func BenchmarkSessionStartCold(b *testing.B) {
 			b.Fatal(msg)
 		}
 	}
+}
+
+const stopInput = `{"session_id":"untrusted","hook_event_name":"Stop","future":true}`
+
+func runStop(t *testing.T, home, name string, env map[string]string, input io.Reader, diagnostic bool) {
+	t.Helper()
+	hookEnv(t, home)
+	for _, k := range []string{host.EnvClaudeSessionID, host.EnvCodexThreadID, host.EnvHost, host.EnvSessionID, host.EnvWork, host.EnvAssignment, host.EnvRole} {
+		t.Setenv(k, env[k])
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "hook", "stop", "--host", name)
+	var out, diag bytes.Buffer
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, &out, &diag
+	if err := cmd.Run(); err != nil || out.Len() != 0 {
+		t.Fatalf("Stop 退出 %v，stdout=%q，stderr=%q", err, &out, &diag)
+	}
+	if diagnostic {
+		if strings.Count(diag.String(), "\n") != 1 || strings.TrimSpace(diag.String()) == "" {
+			t.Fatalf("期望一行诊断，stderr=%q", &diag)
+		}
+	} else if diag.Len() != 0 {
+		t.Fatalf("Stop 应静默，stderr=%q", &diag)
+	}
+}
+
+func stopWorkerEnv(name string) map[string]string {
+	if name == host.ClaudeCode {
+		return map[string]string{host.EnvClaudeSessionID: "current", host.EnvWork: "stale"}
+	}
+	env := host.BindingEnv(host.Session{Host: name}, map[string]string{host.EnvWork: "work", host.EnvAssignment: "latest"})
+	env[host.EnvCodexThreadID] = "current"
+	return env
+}
+
+func stopWorkDB(t *testing.T, home, name string, ended bool) *store.SQLite {
+	t.Helper()
+	db := testDB(t, home)
+	w := engine.Work{ID: "work", Execution: &engine.Execution{Session: &engine.Session{Host: name, ID: "current"}, Assignment: "latest"},
+		Assignments: []engine.Assignment{{ID: "latest", State: engine.AssignmentRunning, DeliveredAt: "2025-12-31T23:59:59.000Z"}}}
+	if ended {
+		w.Ended = &engine.WorkEnd{By: "human", At: testNow}
+	}
+	if err := app.NewSQLiteStore(db).Atomic(t.Context(), func(u engine.Unit) error { return u.PutWork(w) }); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+// TestStopMatchesTurnEnded 用相同的初始状态和时钟核对整个 Work，包括报告和轮末时刻。
+func TestStopMatchesTurnEnded(t *testing.T) {
+	for _, name := range []string{host.ClaudeCode, "codex"} {
+		t.Run(name, func(t *testing.T) {
+			env := stopWorkerEnv(name)
+			apply := func(hook bool) *engine.Work {
+				home := t.TempDir()
+				db := stopWorkDB(t, home, name, false)
+				if hook {
+					runStop(t, home, name, env, strings.NewReader(stopInput), false)
+				} else {
+					sessionCommand(t, home, env, 0, "watch", "turn-ended")
+				}
+				var work *engine.Work
+				if err := app.NewSQLiteStore(db).Read(t.Context(), func(r engine.Reader) error {
+					var err error
+					work, err = r.GetWork("work")
+					return err
+				}); err != nil || work == nil {
+					t.Fatalf("读取轮末 Work: %v", err)
+				}
+				return work
+			}
+			want, got := apply(false), apply(true)
+			a := got.Assignments[0]
+			if !reflect.DeepEqual(got, want) || a.IdleAt != testNow || a.Report == nil || a.Report.State != engine.Waiting {
+				t.Fatalf("Stop 后的派工 %+v，直接处理轮末后 %+v", a, want.Assignments[0])
+			}
+		})
+	}
+}
+
+// TestStopSkipsUnbound 用独立连接观察提交，静默跳过也不能改变其他表。
+func TestStopSkipsUnbound(t *testing.T) {
+	for _, tc := range []struct {
+		label, name string
+		env         map[string]string
+		ended       bool
+	}{
+		{"人的会话", "codex", nil, false},
+		{"仅有线程号", "codex", map[string]string{host.EnvCodexThreadID: "current"}, false},
+		{"未知会话", host.ClaudeCode, map[string]string{host.EnvClaudeSessionID: "other"}, false},
+		{"陈旧的 Claude 环境", host.ClaudeCode, host.BindingEnv(host.Session{Host: host.ClaudeCode, ID: "current"}, map[string]string{host.EnvWork: "work", host.EnvAssignment: "latest"}), false},
+		{"Codex 派工不符", "codex", host.BindingEnv(host.Session{Host: "codex", ID: "current"}, map[string]string{host.EnvWork: "work", host.EnvAssignment: "old"}), false},
+		{"宿主不符", host.ClaudeCode, stopWorkerEnv("codex"), false},
+		{"Claude 工作已结束", host.ClaudeCode, stopWorkerEnv(host.ClaudeCode), true},
+		{"Codex 工作已结束", "codex", stopWorkerEnv("codex"), true},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			home := t.TempDir()
+			db := stopWorkDB(t, home, tc.name, tc.ended)
+			before, err := db.DataVersion(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			runStop(t, home, tc.name, tc.env, strings.NewReader(stopInput), false)
+			if after, err := db.DataVersion(t.Context()); err != nil || after != before {
+				t.Fatalf("状态库发生写入 %d → %d: %v", before, after, err)
+			}
+		})
+	}
+}
+
+// TestStopWithoutWorkerEnvironment 守住每轮都会经过的无身份路径。
+func TestStopWithoutWorkerEnvironment(t *testing.T) {
+	home := t.TempDir()
+	getenv := func(key string) string {
+		if key == "CRAFT_HOME" {
+			t.Error("没有会话身份时仍在查找状态目录")
+		}
+		return ""
+	}
+	var out, diag bytes.Buffer
+	exit := runBound([]string{"hook", "stop", "--host", "codex", "--json"}, "dev", &out, &diag, getenv,
+		func() (string, error) { return home, nil }, CommandContext{Session: app.SessionFromEnv(getenv)}, nowUTC)
+	if exit != 0 || out.Len() != 0 || diag.Len() != 0 {
+		t.Fatalf("人的会话退出 %d，stdout=%q，stderr=%q", exit, &out, &diag)
+	}
+}
+
+// TestStopUnavailableStorage 确保宿主通知不会初始化或修复本地状态。
+func TestStopUnavailableStorage(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "missing")
+	for _, name := range []string{host.ClaudeCode, "codex"} {
+		runStop(t, home, name, stopWorkerEnv(name), strings.NewReader(stopInput), false)
+	}
+	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("缺失的状态目录被创建: %v", err)
+	}
+	home = t.TempDir()
+	path := filepath.Join(home, "craft.db")
+	raw := []byte("损坏的数据库")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{host.ClaudeCode, "codex"} {
+		runStop(t, home, name, stopWorkerEnv(name), strings.NewReader(stopInput), false)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("损坏的库被改写: %v", err)
+	}
+}
+
+// TestStopInputErrors 以有效派工覆盖解析失败和一直不给 EOF 的宿主。
+func TestStopInputErrors(t *testing.T) {
+	home := t.TempDir()
+	db := stopWorkDB(t, home, "codex", false)
+	before, err := db.DataVersion(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := stopWorkerEnv("codex")
+	for _, input := range []string{"", stopInput + "!", hookInput, strings.Repeat(" ", 64<<10) + stopInput} {
+		runStop(t, home, "codex", env, strings.NewReader(input), true)
+	}
+	// 宿主保持写端打开时也必须自行返回。
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := errors.Join(r.Close(), w.Close()); err != nil {
+			t.Error(err)
+		}
+	}()
+	runStop(t, home, "codex", env, r, true)
+	if after, err := db.DataVersion(t.Context()); err != nil || after != before {
+		t.Fatalf("错误输入修改了状态库 %d → %d: %v", before, after, err)
+	}
+}
+
+// TestStopHostArgument 区分 CLI 用法错误和宿主运行时故障。
+func TestStopHostArgument(t *testing.T) {
+	home := t.TempDir()
+	for _, hook := range []string{"session-start", "stop"} {
+		r := command(t, home, 2, "hook", hook, "--host", "unknown")
+		if r.Error.Code != "invalidArguments" || !strings.Contains(r.Error.Message, "--host") {
+			t.Fatal(r.Error)
+		}
+	}
+}
+
+// TestStopWorkerError 验证通过绑定检查之后的处理错误也会交还宿主。
+func TestStopWorkerError(t *testing.T) {
+	home := t.TempDir()
+	db := stopWorkDB(t, home, "codex", false)
+	// 能识别 worker，但损坏的策略会让实际轮末事务失败。
+	if err := db.Atomic(t.Context(), func(tx store.Tx) error {
+		return tx.Put("watch_kv", "policy.settings", []byte(`{}`))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runStop(t, home, "codex", stopWorkerEnv("codex"), strings.NewReader(stopInput), true)
 }

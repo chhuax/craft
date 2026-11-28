@@ -34,15 +34,22 @@ func (s *SQLite) View(ctx context.Context, fn func(SQLiteReader) error) error {
 	}
 	return transact(tx, func(tx *sql.Tx) error {
 		// 延迟事务直到首次读取库页才固定快照，须在将控制权交给回调前读取。
-		var version int
-		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		if err := checkVersion(tx.QueryRowContext(ctx, "PRAGMA user_version")); err != nil {
 			return fmt.Errorf("建立 SQLite 读快照: %w", err)
-		}
-		if version != 1 {
-			return fmt.Errorf("不支持读取数据库版本 %d", version)
 		}
 		return fn(SQLiteReader{ctx, tx})
 	})
+}
+
+func checkVersion(row *sql.Row) error {
+	var version int
+	if err := row.Scan(&version); err != nil {
+		return fmt.Errorf("读取数据库版本: %w", err)
+	}
+	if version != 1 {
+		return fmt.Errorf("不支持数据库版本 %d", version)
+	}
+	return nil
 }
 
 // Atomic 独占写连接直到提交或回滚，提交回调在释放写锁之后执行。

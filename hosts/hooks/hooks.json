@@ -7,6 +7,13 @@
         "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/craft\" hook session-start --host claude-code",
         "timeout": 15
       }]
+    }],
+    "Stop": [{
+      "hooks": [{
+        "type": "command",
+        "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/craft\" hook stop --host claude-code",
+        "timeout": 15
+      }]
     }]
   }
 }
