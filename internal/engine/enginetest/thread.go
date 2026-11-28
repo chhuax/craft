@@ -11,7 +11,7 @@ func threadStatus(t *testing.T, s engine.Store) {
 	ref := engine.NewThreadRef("feed", "item", "a")
 	key := engine.ThreadKey(ref)
 	ctx := t.Context()
-	e := engine.New(engine.Config{Store: s, Clock: func() string { return now }})
+	e := newEngine(t, config(s))
 	var seen []engine.Event
 	s.Subscribe(func(ev engine.Event) { seen = append(seen, ev) })
 

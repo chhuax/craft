@@ -17,6 +17,7 @@ func Run(t *testing.T, factory func(t *testing.T) engine.Store) {
 		check func(*testing.T, engine.Store)
 	}{
 		{"对象状态事实", threadStatus},
+		{"对象描述与补丁", threadMeta},
 	} {
 		t.Run(tc.name, func(t *testing.T) { tc.check(t, factory(t)) })
 	}
@@ -27,4 +28,15 @@ func must(t *testing.T, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func newEngine(t *testing.T, cfg engine.Config) *engine.Engine {
+	t.Helper()
+	e, err := engine.New(cfg)
+	must(t, err)
+	return e
+}
+
+func config(s engine.Store) engine.Config {
+	return engine.Config{Store: s, Clock: func() string { return now }, Policy: func() engine.Policy { return engine.Policy{} }}
 }
