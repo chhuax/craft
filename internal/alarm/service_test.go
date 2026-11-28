@@ -2,7 +2,6 @@ package alarm
 
 import (
 	"context"
-	"errors"
 	"math/rand/v2"
 	"slices"
 	"testing"
@@ -66,14 +65,19 @@ func TestEveryAndStartup(t *testing.T) {
 	}
 }
 
+// 自定义错误可从公开快照补充上下文，能检出服务在锁内调用 Error 的死锁。
+type runError struct{ service *Service }
+
+func (e runError) Error() string { return e.service.List()[0].ID + " 运行出错" }
+
 func TestFailureBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var health []bool
+		changes := make(chan bool, 8)
 		cfg := Config{GlobalLimit: 1, OnHealth: func(id string, bad bool) {
 			if id != "a" {
 				t.Errorf("健康通知的 ID = %q", id)
 			}
-			health = append(health, bad)
+			changes <- bad
 		}}
 		s, c := service(t, cfg)
 		var n int
@@ -85,7 +89,7 @@ func TestFailureBackoff(t *testing.T) {
 				}
 				return nil
 			}
-			return errors.New("运行出错")
+			return runError{s}
 		}}
 		must(t, s.Start(t.Context()))
 		must(t, s.Register(spec))
@@ -94,8 +98,20 @@ func TestFailureBackoff(t *testing.T) {
 		for i, delay := range delays {
 			c.Advance(0)
 			got := s.List()[0]
-			if got.ConsecutiveFailures != i+1 || got.LastResult != "failed" || got.LastError == "" || got.State != "backoff" || got.Next.Sub(c.Now()) != delay {
+			if got.ConsecutiveFailures != i+1 || got.LastResult != "failed" || got.LastError != "a 运行出错" || got.State != "backoff" || got.Next.Sub(c.Now()) != delay {
 				t.Fatalf("第 %d 次失败 %+v，期望退避 %v", i+1, got, delay)
+			}
+			if i == 4 {
+				select {
+				case bad := <-changes:
+					if !bad {
+						t.Fatal("第 5 次失败时发出了恢复通知")
+					}
+				default:
+					t.Fatal("第 5 次失败时缺少健康告警")
+				}
+			} else if len(changes) != 0 {
+				t.Fatalf("第 %d 次失败时多发了健康通知", i+1)
 			}
 			if i < len(delays)-1 {
 				c.Advance(delay)
@@ -104,8 +120,8 @@ func TestFailureBackoff(t *testing.T) {
 		must(t, s.Trigger("a"))
 		c.Advance(0)
 		got := s.List()[0]
-		if got.ConsecutiveFailures != 0 || got.LastResult != "success" || got.LastError != "" || got.Next.Sub(c.Now()) != time.Hour || !slices.Equal(health, []bool{true, false}) {
-			t.Fatalf("恢复时快照 %+v，通知 %v", got, health)
+		if got.ConsecutiveFailures != 0 || got.LastResult != "success" || got.LastError != "" || got.Next.Sub(c.Now()) != time.Hour || len(changes) != 1 || <-changes {
+			t.Fatalf("恢复时快照或通知错误 %+v", got)
 		}
 	})
 }

@@ -48,8 +48,12 @@ func NewService(cfg Config) (*Service, error) {
 		cfg.FailureThreshold = 5
 	}
 	return &Service{
-		cfg: cfg, alarms: make(map[string]*entry), limits: make(map[string]int),
-		groups: make(map[string]int), wake: make(chan struct{}, 1), done: make(chan struct{}),
+		cfg:    cfg,
+		alarms: make(map[string]*entry),
+		limits: make(map[string]int),
+		groups: make(map[string]int),
+		wake:   make(chan struct{}, 1),
+		done:   make(chan struct{}),
 	}, nil
 }
 
@@ -81,7 +85,10 @@ func (s *Service) Register(spec AlarmSpec) error {
 	}
 	enabled := spec.Enabled == nil || *spec.Enabled
 	spec.Enabled = nil // 用户可在登记后修改原有开关；服务只保留当时的值。
-	e := &entry{spec: spec, at: at, enabled: enabled, startup: spec.Startup, snap: Snapshot{ID: spec.ID}}
+	e := &entry{
+		spec: spec, at: at, enabled: enabled, startup: spec.Startup,
+		snap: Snapshot{ID: spec.ID},
+	}
 	s.alarms[spec.ID] = e
 	if s.ctx != nil {
 		s.planFirst(e, s.cfg.Clock.Now())
@@ -108,7 +115,7 @@ func (s *Service) Unregister(id string) error {
 	return nil
 }
 
-// SetGroupLimit 可在启停前或运行中并发设置正整数上限。调低只影响后续触发。
+// SetGroupLimit 可在启动前或运行中并发设置正整数上限。调低只影响后续触发。
 func (s *Service) SetGroupLimit(group string, n int) error {
 	if n < 1 {
 		return fmt.Errorf("闹钟组 %q 的并发上限 %d 须为正", group, n)

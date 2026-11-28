@@ -105,6 +105,11 @@ func callRun(ctx context.Context, spec AlarmSpec, req RunRequest) (err error) {
 }
 
 func (s *Service) record(e *entry, err error, at time.Time) {
+	// error 也由调用方提供，其 Error 方法可能读取服务状态。
+	var detail string
+	if err != nil {
+		detail = err.Error()
+	}
 	s.mu.Lock()
 	if e.removed {
 		s.mu.Unlock()
@@ -121,7 +126,7 @@ func (s *Service) record(e *entry, err error, at time.Time) {
 			s.planRegular(e, at)
 		}
 	} else {
-		e.snap.LastResult, e.snap.LastError = "failed", err.Error()
+		e.snap.LastResult, e.snap.LastError = "failed", detail
 		e.snap.ConsecutiveFailures++
 		if periodic {
 			delays := [...]time.Duration{2 * time.Second, 10 * time.Second, time.Minute, 5 * time.Minute}
