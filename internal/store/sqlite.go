@@ -36,12 +36,24 @@ func WithClock(now func() time.Time) Option {
 
 // OpenSQLite 打开或创建本地文件并在返回前完成迁移。WAL 依赖本机锁与共享内存，
 // 不支持网络盘。调用方负责 Close，logger 为 nil 时使用 slog 默认日志。
-func OpenSQLite(ctx context.Context, path string, logger *slog.Logger, opts ...Option) (_ *SQLite, err error) {
+func OpenSQLite(ctx context.Context, path string, logger *slog.Logger, opts ...Option) (*SQLite, error) {
+	return openSQLite(ctx, path, false, logger, opts...)
+}
+
+// OpenExistingSQLite 供宿主通知使用，状态目录被移走时不能重建空库或迁移替代库。
+func OpenExistingSQLite(ctx context.Context, path string) (*SQLite, error) {
+	return openSQLite(ctx, path, true, nil)
+}
+
+func openSQLite(ctx context.Context, path string, existing bool, logger *slog.Logger, opts ...Option) (_ *SQLite, err error) {
 	file, params, err := sqliteURI(path)
 	if err != nil {
 		return nil, err
 	}
 	params.Set("_txlock", "immediate")
+	if existing {
+		params.Set("mode", "rw")
+	}
 	file.RawQuery = params.Encode()
 	writeDB, err := sql.Open("sqlite", file.String())
 	if err != nil {
@@ -64,13 +76,20 @@ func OpenSQLite(ctx context.Context, path string, logger *slog.Logger, opts ...O
 	if err != nil {
 		return nil, fmt.Errorf("连接数据库 %q: %w", path, err)
 	}
-	if err := migrate.Apply(ctx, s.writer); err != nil {
+	if existing {
+		err = checkVersion(s.writer.QueryRowContext(ctx, "PRAGMA user_version"))
+	} else {
+		err = migrate.Apply(ctx, s.writer)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("打开数据库 %q: %w", path, err)
 	}
 
 	params.Del("_txlock")
 	params.Set("mode", "ro")
-	params.Add("_pragma", "journal_mode(WAL)")
+	if !existing {
+		params.Add("_pragma", "journal_mode(WAL)")
+	}
 	file.RawQuery = params.Encode()
 	s.reader, err = sql.Open("sqlite", file.String())
 	if err != nil {
