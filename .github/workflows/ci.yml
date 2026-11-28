@@ -23,6 +23,9 @@ jobs:
       - name: 组装并校验五目标通用包（假构建）
         if: runner.os == 'Linux'
         run: go test -count=1 ./tools/package -run '^TestUniversalPackage$'
+      - run: go -C extensions/github build ./...
+      - run: go -C extensions/github vet ./...
+      - run: go -C extensions/github test -race ./...
 
   lint:
     runs-on: ubuntu-latest
@@ -34,6 +37,8 @@ jobs:
           cache: false
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.15.0
           skip-cache: true
       - run: golangci-lint fmt --diff
+      - run: golangci-lint run && golangci-lint fmt --diff
+        working-directory: extensions/github

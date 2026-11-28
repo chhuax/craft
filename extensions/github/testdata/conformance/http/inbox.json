@@ -1,0 +1,67 @@
+[
+  {
+    "method": "GET",
+    "path": "/notifications",
+    "query": {
+      "participating": "true",
+      "all": "true",
+      "page": "1",
+      "per_page": "100",
+      "since": "*"
+    },
+    "status": 200,
+    "body": [
+      {
+        "id": "37",
+        "reason": "state_change",
+        "updated_at": "${CRAFT_FIXTURE_NOW}",
+        "subject": {
+          "type": "PullRequest",
+          "title": "更新说明",
+          "url": "https://api.github.com/repos/north/demo/pulls/5",
+          "latest_comment_url": null
+        },
+        "repository": {
+          "full_name": "north/demo"
+        }
+      }
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/user",
+    "status": 200,
+    "body": {
+      "login": "reader",
+      "type": "User"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/user",
+    "status": 401,
+    "body": {
+      "message": "Bad credentials"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/north/demo/pulls/5",
+    "status": 200,
+    "body": {
+      "number": 5,
+      "state": "closed",
+      "merged": true,
+      "title": "更新说明",
+      "merged_by": {
+        "login": "reviewer",
+        "id": 21,
+        "type": "User"
+      },
+      "merged_at": "${CRAFT_FIXTURE_NOW}",
+      "closed_at": "${CRAFT_FIXTURE_NOW}",
+      "updated_at": "${CRAFT_FIXTURE_NOW}",
+      "html_url": "https://github.com/north/demo/pull/5"
+    }
+  }
+]

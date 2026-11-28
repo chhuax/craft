@@ -3,3 +3,5 @@
 /dist/
 *.test
 .craft/
+/extensions/github/craft-ext-github
+/extensions/github/craft-ext-github.exe

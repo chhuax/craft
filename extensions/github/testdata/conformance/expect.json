@@ -1,0 +1,8 @@
+{
+  "threadIds": [
+    "pull_request:north/demo#5"
+  ],
+  "lookback": {
+    "param": "since"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "apiBase": "${CRAFT_FIXTURE_HTTP}",
+  "tokenEnv": "CRAFT_FIXTURE_GITHUB_TOKEN",
+  "pollWindowDays": 1
+}

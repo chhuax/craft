@@ -17,6 +17,7 @@ import (
 
 // 扩展宿主共享公开协议，适配器契约套件共享引擎端口；例外均精确到包。
 var standardImportExceptions = map[[2]string]bool{
+	{"extensions/github", "github.com/chhuax/craft/pkg/protocol"}:             true,
 	{"internal/exthost", "github.com/chhuax/craft/pkg/protocol"}:              true,
 	{"internal/engine/enginetest", "github.com/chhuax/craft/internal/engine"}: true,
 	{"internal/engine/repotest", "github.com/chhuax/craft/internal/engine"}:   true,
@@ -29,9 +30,9 @@ func allowedImport(dir, pkg string) bool {
 func TestStandardLibraryOnly(t *testing.T) {
 	root := os.DirFS(filepath.Join("..", ".."))
 	imports := make(map[string][]string)
-	for _, dir := range []string{"internal/alarm", "internal/engine", "internal/exthost", "internal/method"} {
+	for _, dir := range []string{"extensions/github", "internal/alarm", "internal/engine", "internal/exthost", "internal/method"} {
 		err := fs.WalkDir(root, dir, func(name string, entry fs.DirEntry, err error) error {
-			if err != nil || entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			if err != nil || entry.IsDir() || !strings.HasSuffix(name, ".go") || (dir != "extensions/github" && strings.HasSuffix(name, "_test.go")) {
 				return err
 			}
 			if !entry.Type().IsRegular() {
