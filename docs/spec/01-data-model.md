@@ -12,7 +12,7 @@
 ## 2. 引用
 
 ```
-ThreadRef  { source, kind, id }          // 扩展声明的对象；source 为扩展 id
+ThreadRef  { source, kind, id }          // 扩展声明的对象；source 是扩展 manifest 里 watch_sources 声明的来源 id，每个 source 只归一个扩展
 ActorRef   { source, id, name? }
 ChannelRef { source, thread, ... }       // 回复送去哪；内核只比较整体相等
 threadKey(ref) = "<source>:<kind>:<id>"

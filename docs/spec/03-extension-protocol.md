@@ -49,6 +49,7 @@
 - manifest 字段一律顶层、snake_case。
 - 事件目录项：`id`、`label`、`default`（`off|observe|auto`）、`strength`（`explicit|inferred`）、`followup_only`、`on_unmatched`（`filter|record`）、`feed_tier`（`notice|digest`）、`rule`、`verb`（≤6 字，仅展示）、`no_target`（`scratch`）、`collapse`（`{group, by?}`，投递时合并同类事件）。
 - 非法值在加载 manifest 时拒绝。事件类型按 `<source>:<event>` 全局唯一。
+- **每个 `watch_sources[].id` 只归一个扩展**：一个扩展可以声明多个 source，但两个扩展声明同一个 source 时，**争用的各方都被拒绝加载**（结果不依赖加载顺序，其他独立扩展照常启动）。这是权限边界：扩展只能写自己声明的 source 下的对象（`thread/describe`、`thread/closed`、`work/bindThread` 等），source 被两个扩展共用就等于它们能互相改对方的对象。`craft` 是内核内置人事件的保留 source，任何扩展都不能声明。
 - `rule`、`default`、`strength` 进策略版本；`verb`、`no_target`、`collapse`、`feed_tier` 不进。
 
 ## 2. 生命周期
