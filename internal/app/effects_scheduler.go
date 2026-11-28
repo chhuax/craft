@@ -31,6 +31,7 @@ type EffectHandler interface {
 
 // EffectResult 的零值表示 OK，Later 只推迟到期时间；Err 非空时按失败退避。
 type EffectResult struct {
+	Due   time.Time
 	Later bool
 	Err   error
 }

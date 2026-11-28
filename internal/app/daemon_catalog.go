@@ -101,21 +101,14 @@ func (d *Daemon) fingerprint() string {
 }
 
 func (d *Daemon) observeEffects(ctx context.Context) error {
-	states := map[string]HealthState{}
+	var stats store.EffectStats
 	err := d.db.View(ctx, func(r store.SQLiteReader) error {
-		for _, kind := range []string{"launch", "delivery", "reply", "stop"} {
-			stats, err := r.EffectStats(kind)
-			if err != nil {
-				return err
-			}
-			states[kind] = HealthState{EffectStats: stats, Status: "paused"}
-		}
-		return nil
+		var err error
+		stats, err = r.EffectStats("reply")
+		return err
 	})
 	if err == nil {
-		for kind, state := range states {
-			d.health.effect(kind, state)
-		}
+		d.health.effect("reply", HealthState{EffectStats: stats, Status: "paused"})
 	}
 	return err
 }

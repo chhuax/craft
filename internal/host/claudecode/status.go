@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -230,4 +231,35 @@ func (*Driver) Open(_ context.Context, s host.Session) error {
 		return host.Unsupported
 	}
 	return fmt.Errorf("%w: 可在终端用 claude --resume %s 查看", host.Unsupported, s.ID)
+}
+
+// WorktreePath 允许在仓库的独立任务目录中创建 detached worktree。
+func (*Driver) WorktreePath(repo, name string) string { return filepath.Join(repo, ".worktrees", name) }
+
+// Statuses 让整拍共用一份后台清单，清单缺失与查询出错必须区分。
+func (d *Driver) Statuses(ctx context.Context, sessions []host.Session) map[host.Session]host.State {
+	list, err := d.list(ctx, true)
+	result := make(map[host.Session]host.State, len(sessions))
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, s := range sessions {
+		switch {
+		case !valid(s):
+			result[s] = host.UnknownState
+		case d.current[s.ID] != nil:
+			result[s] = host.Busy
+		case err != nil:
+			result[s] = host.UnknownState
+		default:
+			a, ok := list[s.ID]
+			if !ok {
+				result[s] = host.Gone
+			} else if a.WaitingFor != "" || strings.EqualFold(a.Status, "waiting") {
+				result[s] = host.WaitingPerson
+			} else {
+				result[s] = a.state()
+			}
+		}
+	}
+	return result
 }

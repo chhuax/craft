@@ -15,8 +15,9 @@ import (
 	"github.com/chhuax/craft/internal/store"
 )
 
-// SessionBinding 只接受宿主已经核实的身份。调用者不能用命令行提供的 Work 标识替代绑定。
+// SessionBinding 声明宿主与派工；执行命令前必须在同一事务核对本地登记。
 type SessionBinding struct {
+	WorkID     string
 	Session    engine.Session
 	Assignment string
 }
@@ -70,6 +71,9 @@ func (r CommandReader) boundWork(b SessionBinding) (*engine.Work, error) {
 	var w engine.Work
 	if err := decodeDocs(rows[:1], func(int) any { return &w }); err != nil {
 		return nil, err
+	}
+	if b.WorkID != "" && w.ID != b.WorkID {
+		return nil, &engine.UserError{Code: engine.CodeNoWorkForSession}
 	}
 	if w.Ended != nil {
 		return nil, &engine.UserError{Code: engine.CodeWorkEnded}

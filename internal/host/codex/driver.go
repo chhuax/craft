@@ -299,3 +299,49 @@ func (*Driver) Open(_ context.Context, s host.Session) error {
 	}
 	return fmt.Errorf("%w: 请打开 codex://threads/%s", host.Unsupported, s.ID)
 }
+
+// WorktreePath 允许在仓库的独立任务目录中创建 detached worktree。
+func (*Driver) WorktreePath(repo, name string) string { return filepath.Join(repo, ".worktrees", name) }
+
+// Statuses 只取线程清单。清单没有某项不能证明它已消失，按 unknown 恢复。
+func (d *Driver) Statuses(ctx context.Context, sessions []host.Session) map[host.Session]host.State {
+	result := make(map[host.Session]host.State, len(sessions))
+	for _, s := range sessions {
+		result[s] = host.UnknownState
+	}
+	params := map[string]any{"limit": 100}
+	seen := map[string]bool{}
+	for {
+		var page struct {
+			Data []thread
+			Next string `json:"nextCursor"`
+		}
+		if err := d.s.call(ctx, "thread/list", params, &page); err != nil {
+			return result
+		}
+		for _, th := range page.Data {
+			s := host.Session{Host: hostName, ID: th.ID}
+			if _, ok := result[s]; ok {
+				switch statusName(th.Status) {
+				case "waiting_person", "waiting", "approval":
+					result[s] = host.WaitingPerson
+				default:
+					result[s] = state(th.Status)
+				}
+			}
+		}
+		if page.Next == "" || seen[page.Next] {
+			return result
+		}
+		seen[page.Next] = true
+		params["cursor"] = page.Next
+	}
+}
+
+// Rename 对已登记线程同步显示标题；线程归属必须先由调用方按会话 ID 核对。
+func (d *Driver) Rename(ctx context.Context, s host.Session, title string) error {
+	if !valid(s) || title == "" {
+		return host.Unsupported
+	}
+	return d.s.call(ctx, "thread/name/set", map[string]string{"threadId": s.ID, "name": title}, nil)
+}

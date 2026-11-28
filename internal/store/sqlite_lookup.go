@@ -23,10 +23,13 @@ func threadPage(open bool) string {
 // 所有命名查询都返回键和可选 JSON 投影。只取标识的反查不装载聚合，
 // 最近 N 项的排除集合只展开一次，不占用数量随输入增长的绑定参数。
 var lookups = map[string]string{
-	"totals":     "SELECT name,total FROM document_count WHERE name IN ('watch_thread','watch_work')",
-	"workPage":   "SELECT key,value FROM watch_work WHERE key>? ORDER BY key LIMIT ?",
-	"openPage":   "SELECT key,value FROM watch_work WHERE ended IS NULL AND key>? ORDER BY key LIMIT ?",
-	"threadPage": threadPage(false), "openThreadPage": threadPage(true),
+	"executorRunning": `SELECT key,value FROM watch_work INDEXED BY work_recent WHERE ended IS NULL AND value->>'$.assignments[#-1].state'='running' ORDER BY created,ordinal`,
+	"executorSignals": `SELECT key,value FROM watch_kv WHERE key>='turn_end.' AND key<'turn_end/'`,
+	"executorOpen":    `SELECT key,value FROM watch_work WHERE ended IS NULL ORDER BY created,ordinal`,
+	"totals":          "SELECT name,total FROM document_count WHERE name IN ('watch_thread','watch_work')",
+	"workPage":        "SELECT key,value FROM watch_work WHERE key>? ORDER BY key LIMIT ?",
+	"openPage":        "SELECT key,value FROM watch_work WHERE ended IS NULL AND key>? ORDER BY key LIMIT ?",
+	"threadPage":      threadPage(false), "openThreadPage": threadPage(true),
 	"attentionWorks":    `SELECT key,value FROM watch_work INDEXED BY work_attention WHERE ended IS NULL AND (value->'$.delivery' IS NOT NULL OR value->'$.attention' IS NOT NULL OR value->'$.assignments[#-1].report' IS NOT NULL)`,
 	"warningKeys":       `SELECT DISTINCT thread_key,NULL FROM watch_decision INDEXED BY decision_warning WHERE thread_key>'' AND value->>'$.kind'='unavailable' AND coalesce(value->>'$.dismissed',0)=0`,
 	"sessionWorks":      `SELECT key,value FROM watch_work WHERE value->>'$.execution.session.host'=? AND value->>'$.execution.session.id'=? ORDER BY ended LIMIT 2`,

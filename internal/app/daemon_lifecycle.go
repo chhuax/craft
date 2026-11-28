@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chhuax/craft/internal/alarm"
+	"github.com/chhuax/craft/internal/engine"
 	"github.com/chhuax/craft/internal/exthost"
 	"github.com/chhuax/craft/internal/outbound"
 	"github.com/chhuax/craft/internal/store"
@@ -46,6 +47,7 @@ type Daemon struct {
 	health             *daemonHealth
 	db                 *store.SQLite
 	runtime            *Runtime
+	executor           *executor
 	hosts              map[string]*exthost.Host
 	order              []string
 	alarms             *alarm.Service
@@ -171,20 +173,28 @@ func (d *Daemon) startRuntime(ctx context.Context, extensions []exthost.Extensio
 	if err != nil {
 		return err
 	}
-	effects, err := NewEffectScheduler(d.db, d.cfg.Clock, 2*time.Second, 5*time.Minute, d.health.effect, assessmentHandler{d.runtime, scope})
+	if err := d.setupExecutor(); err != nil {
+		return err
+	}
+	if err := d.startOutbound(ctx, extensions); err != nil {
+		return err
+	}
+	return d.startEffects(ctx, scope, settings, catalog)
+}
+
+// 恢复、启动调度、再开始 Pass。测试可在同一入口接入离线驱动。
+func (d *Daemon) startEffects(ctx context.Context, scope engine.SourceScope, settings engine.Settings, catalog []engine.EventDef) error {
+	effects, err := NewEffectScheduler(d.db, d.cfg.Clock, 2*time.Second, 5*time.Minute, d.health.effect, assessmentHandler{d.runtime, scope}, executorHandler{d.executor, "launch"}, executorHandler{d.executor, "delivery"}, executorHandler{d.executor, "stop"})
 	if err != nil {
 		return err
 	}
 	d.runtime.effects = effects
 	d.runtime.repo.onEvent = d.cfg.OnEvent
-	if err := d.startOutbound(ctx, extensions); err != nil {
-		return err
-	}
 	// 启动调用者可在成功后释放 ctx。执行池一直保留到 Pass 退出之后。
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := d.runtime.Start(context.WithoutCancel(ctx), settings, catalog); err != nil {
+	if err := d.runtime.start(context.WithoutCancel(ctx), settings, catalog, func() error { return d.executor.sample(ctx, true) }); err != nil {
 		return err
 	}
 	return d.observeEffects(ctx)
@@ -269,6 +279,9 @@ func (d *Daemon) startAlarms(ctx context.Context, exts []exthost.Extension) erro
 		return err
 	}
 	d.alarms = s
+	if err := s.Register(alarm.AlarmSpec{ID: "watch.sessions", Every: 10 * time.Second, Group: "watch", Run: d.executor.monitor}); err != nil {
+		return err
+	}
 	d.queue = newAlarmQueue(d.db, s)
 	if err := d.queue.recover(ctx); err != nil {
 		return err
@@ -379,6 +392,9 @@ func (d *Daemon) shutdown() error {
 	if d.alarms != nil {
 		errs = append(errs, d.alarms.Stop(ctx))
 		errs = append(errs, d.queue.flush(ctx))
+	}
+	if d.executor != nil {
+		errs = append(errs, d.executor.close())
 	}
 	if d.db != nil {
 		errs = append(errs, d.db.Close())

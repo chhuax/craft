@@ -92,6 +92,10 @@ func (r *Runtime) Request() {
 
 // Start 比对持久化的旧策略后启动 effect 和唯一的 Pass。成功后须显式 Stop 以保证停止顺序。
 func (r *Runtime) Start(ctx context.Context, settings engine.Settings, catalog []engine.EventDef) error {
+	return r.start(ctx, settings, catalog, nil)
+}
+
+func (r *Runtime) start(ctx context.Context, settings engine.Settings, catalog []engine.EventDef, recoverSessions func() error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.stopping {
@@ -102,6 +106,11 @@ func (r *Runtime) Start(ctx context.Context, settings engine.Settings, catalog [
 	}
 	if err := r.ApplyPolicy(ctx, settings, catalog); err != nil {
 		return err
+	}
+	if recoverSessions != nil {
+		if err := recoverSessions(); err != nil {
+			return err
+		}
 	}
 	version, err := r.repo.db.DataVersion(ctx)
 	if err != nil {

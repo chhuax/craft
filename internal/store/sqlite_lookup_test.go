@@ -13,6 +13,7 @@ func TestLookupPlans(t *testing.T) {
 	const workKey = "INDEX sqlite_autoindex_watch_work_1 (key=?)"
 	const inputKey = "PRIMARY KEY (work_key=? AND input_id=?)"
 	expected := map[string][]string{
+		"executorRunning": {"INDEX work_recent"}, "executorSignals": {"key>? AND key<?"}, "executorOpen": {"INDEX work_recent"},
 		"totals":   {"PRIMARY KEY (name=?)"},
 		"workPage": {"sqlite_autoindex_watch_work_1"}, "openPage": {"work_open_key"},
 		"threadPage":     {"PRIMARY KEY (thread_key=? AND work_id>?)", "sqlite_autoindex_watch_work_1", "work_origin_key"},

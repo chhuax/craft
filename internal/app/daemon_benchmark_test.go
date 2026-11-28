@@ -72,9 +72,9 @@ func measureDaemonBatch(b *testing.B, size int) {
 	}
 	b.StopTimer()
 	checkErr(b, db.View(b.Context(), func(r store.SQLiteReader) error {
-		stats, err := r.EffectStats("launch")
-		if stats.Waiting != benchInboxCount {
-			b.Fatalf("launch 行数 %d", stats.Waiting)
+		works, err := (engineReader{r}).OpenWorks()
+		if len(works) != benchInboxCount {
+			b.Fatalf("接下的 Work 数 %d", len(works))
 		}
 		return err
 	}))

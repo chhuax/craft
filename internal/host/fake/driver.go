@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"sync"
@@ -19,10 +20,12 @@ type Op string
 
 // 四种有副作用或需采样的操作可以分别编排。
 const (
-	Create Op = "create"
-	Append Op = "append"
-	Stop   Op = "stop"
-	Status Op = "status"
+	Create      Op = "create"
+	Append      Op = "append"
+	Stop        Op = "stop"
+	Status      Op = "status"
+	StatusBatch Op = "statuses"
+	Rename      Op = "rename"
 )
 
 // Step 指定一次调用的延迟、回执及观察到的状态。Create 的 ID 可模拟回调登记后丢失回执。
@@ -43,6 +46,7 @@ type Call struct {
 	Session    host.Session
 	Text       string
 	DeliveryID string
+	Sessions   []host.Session
 }
 
 // Driver 可并发调用。成功收到的投递按会话去重，Unknown 不自动补发。
@@ -85,6 +89,7 @@ func (d *Driver) Calls() []Call {
 	defer d.mu.Unlock()
 	calls := slices.Clone(d.calls)
 	for i, c := range calls {
+		calls[i].Sessions = slices.Clone(c.Sessions)
 		if c.Spec != nil {
 			calls[i].Spec = snapshot(*c.Spec)
 		}
@@ -271,3 +276,37 @@ func (d *Driver) LastReply(_ context.Context, session host.Session) (string, err
 
 // Open 供调用者测试没有人工查看入口时的降级。
 func (*Driver) Open(context.Context, host.Session) error { return host.Unsupported }
+
+// WorktreePath 允许在仓库的独立任务目录中创建 detached worktree。
+func (*Driver) WorktreePath(repo, name string) string { return filepath.Join(repo, ".worktrees", name) }
+
+// Statuses 用一次调用快照标记监视拍，各会话按请求顺序消费脚本。
+func (d *Driver) Statuses(ctx context.Context, sessions []host.Session) map[host.Session]host.State {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.calls = append(d.calls, Call{Op: StatusBatch, Sessions: slices.Clone(sessions)})
+	states := make(map[host.Session]host.State, len(sessions))
+	for _, session := range sessions {
+		if q := d.script[Status]; len(q) > 0 {
+			step := q[0]
+			d.script[Status] = q[1:]
+			if ctx.Err() != nil || step.Err != nil || step.Outcome != "" && step.Outcome != host.OK {
+				states[session] = host.UnknownState
+				continue
+			}
+			d.observe(session, step)
+		}
+		state, ok := d.sessions[session]
+		if !ok {
+			state = host.Gone
+		}
+		states[session] = state
+	}
+	return states
+}
+
+// Rename 记录标题变化，测试可核对退回对象后使用的会话号。
+func (d *Driver) Rename(ctx context.Context, s host.Session, title string) error {
+	_, err := d.begin(ctx, Call{Op: Rename, Session: s, Text: title}, 0)
+	return err
+}

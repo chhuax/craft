@@ -100,6 +100,10 @@ func (r *effectRun) dispatch(k *effectKind, now time.Time) time.Time {
 		}
 		if ordered {
 			rows, next, err = orderedEffect(reader, h.Kind(), now)
+		} else if picker, ok := h.(interface {
+			selectDue(store.SQLiteReader, time.Time, int) ([]store.Effect, time.Time, error)
+		}); ok {
+			rows, next, err = picker.selectDue(reader, now, limit)
 		} else {
 			rows, next, err = unorderedEffects(reader, h.Kind(), now, limit)
 		}
@@ -211,11 +215,17 @@ func (r *effectRun) finish(c effectCompletion) {
 		message = fmt.Sprint(c.result.Err)
 	}
 	err := r.db.Write(r.ctx, func(tx *store.SQLiteTx) error {
+		base := r.retryBase
+		if c.row.Kind == "launch" {
+			base = 5 * time.Second
+		}
 		switch {
+		case !c.result.Due.IsZero():
+			return tx.LaterEffect(c.row, c.result.Due, 0)
 		case c.result.Err != nil:
-			return tx.FailEffect(c.row, r.clock.Now(), r.retryBase, r.retryMax, message)
+			return tx.FailEffect(c.row, r.clock.Now(), base, r.retryMax, message)
 		case c.result.Later:
-			return tx.LaterEffect(c.row, r.clock.Now(), r.retryBase)
+			return tx.LaterEffect(c.row, r.clock.Now(), base)
 		default:
 			return tx.DeleteEffect(c.row)
 		}

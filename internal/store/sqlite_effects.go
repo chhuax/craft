@@ -150,3 +150,8 @@ func (t *SQLiteTx) finishEffect(e Effect, query string, args ...any) error {
 	}
 	return nil
 }
+
+// DueLaunches 在已到期的派工中按最初的 seq 选取；负数上限供按事实排序时读取全部候选。
+func (r SQLiteReader) DueLaunches(now time.Time, limit int) ([]Effect, error) {
+	return r.effects(effectColumns+"WHERE kind='launch' AND due<=? ORDER BY seq LIMIT ?", now.UTC().Format(milliseconds), limit)
+}

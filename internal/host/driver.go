@@ -11,6 +11,8 @@ import (
 // Driver 管理持久会话。未知投递必须由人按标记核对，驱动和调用方均不可自动重发。
 type Driver interface {
 	Capabilities() Capabilities
+	WorktreePath(repo, name string) string
+	Statuses(context.Context, []Session) map[Session]State
 	Create(context.Context, CreateSpec) (Session, error)
 	Append(context.Context, Session, string, string) Result
 	Stop(context.Context, Session, time.Duration) error
@@ -30,7 +32,10 @@ type Capabilities struct {
 }
 
 // Session 只携带宿主的规范 ID，短显示号不得用作执行方身份。
-type Session struct{ Host, ID string }
+type Session struct {
+	Host string `json:"host"`
+	ID   string `json:"id"`
+}
 
 // CreateSpec 的 Env 由派工方构造。OnCreated 在获得规范 ID 时同步登记；拒绝登记时须保留 ID 供停止。
 type CreateSpec struct {
@@ -62,10 +67,11 @@ type State string
 
 // 等待审批的会话不能视为空闲；只有明确消失的记录才使用 Gone。
 const (
-	Busy         State = "busy"
-	Idle         State = "idle"
-	Gone         State = "gone"
-	UnknownState State = "unknown"
+	WaitingPerson State = "waiting_person"
+	Busy          State = "busy"
+	Idle          State = "idle"
+	Gone          State = "gone"
+	UnknownState  State = "unknown"
 )
 
 // Outcome 也可包装在 Create、Stop 等操作的 error 中，用 errors.Is 判断。

@@ -248,10 +248,10 @@ func TestDaemonEndToEnd(t *testing.T) {
 		}
 	})
 	alarms := d.alarms.List()
-	if len(alarms) != 2 || alarms[0].ID != "reader:poll" || !alarms[0].Next.Equal(clock.Now().Add(2*time.Hour)) || alarms[1].State != "disabled" {
+	if len(alarms) != 3 || alarms[2].ID != "watch.sessions" || alarms[0].ID != "reader:poll" || !alarms[0].Next.Equal(clock.Now().Add(2*time.Hour)) || alarms[1].State != "disabled" {
 		t.Fatalf("用户闹钟覆盖 %v", alarms)
 	}
-	clock.waitTimers(t, 2*time.Hour, 1)
+	clock.waitTimers(t, 10*time.Second, 1)
 	clock.waitTimers(t, passPeriod, 2)
 	clock.advance(2 * time.Hour)
 	var decision string
@@ -274,11 +274,10 @@ func TestDaemonEndToEnd(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		ok, err := r.HasEffect("launch", w.Assignments[0].ID)
-		if !ok {
-			t.Error("缺少 launch")
+		if len(w.Assignments) != 1 || w.Assignments[0].State != engine.AssignmentPending {
+			t.Error("等待目标的派工应保持 pending")
 		}
-		return err
+		return nil
 	}))
 	h := d.hosts["reader"]
 	at := map[string]string{"at": clock.Now().Format(time.RFC3339Nano)}
@@ -362,6 +361,8 @@ func TestDaemonHostAlarmTimeout(t *testing.T) {
 	defer cancel()
 	checkErr(t, d.Start(ctx))
 	t.Cleanup(func() { checkErr(t, d.Stop(context.Background())) })
+	// 本用例逐拍检查扩展超时的退避定时器，隔离独立的内核周期任务。
+	checkErr(t, d.alarms.Unregister("watch.sessions"))
 	client := inboxDB(t, filepath.Join(d.cfg.StateDir, "craft.db"))
 	id, err := EnqueueAlarm(ctx, client, "reader", "hold")
 	checkErr(t, err)
