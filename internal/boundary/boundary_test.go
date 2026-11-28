@@ -27,22 +27,9 @@ func TestStandardLibraryOnly(t *testing.T) {
 				t.Errorf("%s 必须是仓库内的普通源文件", name)
 				return nil
 			}
-			data, err := fs.ReadFile(root, name)
-			if err != nil {
-				return err
-			}
-			file, err := parser.ParseFile(token.NewFileSet(), name, data, parser.ImportsOnly)
-			if err != nil {
-				return err
-			}
-			for _, spec := range file.Imports {
-				pkg, err := strconv.Unquote(spec.Path.Value)
-				if err != nil {
-					return err
-				}
+			return visitImports(root, name, func(pkg string) {
 				imports[pkg] = append(imports[pkg], name)
-			}
-			return nil
+			})
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -69,6 +56,56 @@ func TestStandardLibraryOnly(t *testing.T) {
 			t.Errorf("%s 导入了非标准库 %q", strings.Join(files, "、"), pkg)
 		}
 	}
+}
+
+func TestSQLOnlyInStore(t *testing.T) {
+	root := os.DirFS(filepath.Join("..", ".."))
+	err := fs.WalkDir(root, ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" || name == "internal/store" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(name, ".go") {
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			t.Errorf("%s 必须是仓库内的普通源文件", name)
+			return nil
+		}
+		return visitImports(root, name, func(pkg string) {
+			if pkg == "database/sql" || pkg == "modernc.org/sqlite" {
+				t.Errorf("%s 导入了 %q，SQL 只能在 internal/store 内使用", name, pkg)
+			}
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 直接解析导入，带构建约束的源文件和别名导入也要守住同一边界。
+func visitImports(root fs.FS, name string, visit func(string)) error {
+	data, err := fs.ReadFile(root, name)
+	if err != nil {
+		return err
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), name, data, parser.ImportsOnly)
+	if err != nil {
+		return err
+	}
+	for _, spec := range file.Imports {
+		pkg, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			return err
+		}
+		visit(pkg)
+	}
+	return nil
 }
 
 const wordList = "tools/forbidden-words.txt"
