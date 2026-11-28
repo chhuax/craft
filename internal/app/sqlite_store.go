@@ -34,7 +34,11 @@ type engineUnit struct {
 }
 
 func (s *engineStore) unit(ctx context.Context, fn func(engine.Unit) error) func(*store.SQLiteTx) error {
-	return func(tx *store.SQLiteTx) error { return fn(&engineUnit{engineReader{tx.SQLiteReader}, tx, s, ctx}) }
+	return func(tx *store.SQLiteTx) error { return fn(s.in(ctx, tx)) }
+}
+
+func (s *engineStore) in(ctx context.Context, tx *store.SQLiteTx) *engineUnit {
+	return &engineUnit{engineReader{tx.SQLiteReader}, tx, s, ctx}
 }
 
 func (s *engineStore) Atomic(ctx context.Context, fn func(engine.Unit) error) error {

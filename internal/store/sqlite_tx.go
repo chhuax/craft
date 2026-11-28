@@ -49,17 +49,27 @@ func (s *SQLite) Atomic(ctx context.Context, fn func(Tx) error) error {
 
 // Write 在一个 IMMEDIATE 事务中提供文档和专用表的原子操作。
 func (s *SQLite) Write(ctx context.Context, fn func(*SQLiteTx) error) error {
+	return s.WriteAndPublish(ctx, fn, nil)
+}
+
+// WriteAndPublish 在提交成功后、让出本连接前发布内存快照，避免下一条命令读到旧版。
+// publish 只能更新进程内存，不得阻塞或重入仓储；一般通知仍应使用 AfterCommit。
+func (s *SQLite) WriteAndPublish(ctx context.Context, fn func(*SQLiteTx) error, publish func()) error {
 	var write SQLiteTx
 	err := s.withWriter(ctx, func() error {
 		tx, err := s.writer.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("开始 SQLite 写事务: %w", err)
 		}
-		return transact(tx, func(tx *sql.Tx) error {
+		err = transact(tx, func(tx *sql.Tx) error {
 			write.SQLiteReader = SQLiteReader{ctx, tx}
 			write.now = s.now
 			return fn(&write)
 		})
+		if err == nil && publish != nil {
+			publish()
+		}
+		return err
 	})
 	if err != nil {
 		return err
