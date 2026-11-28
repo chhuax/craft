@@ -69,9 +69,20 @@
 | **真实会话里的裸命令** | `command -v craft` 解析到 `<插件根>/bin/craft`，`craft version` 经 sh 启动器转交 `darwin-arm64` 二进制并输出版本。**skill 里直接写 `craft ...` 在 Claude Code 上可用** |
 | SessionStart hook | 触发；`CLAUDE_PLUGIN_ROOT` 与 `CLAUDE_PLUGIN_DATA` 按文档注入；hook 内可经启动器调用二进制 |
 
+### 已实测（2026-11-28，Codex CLI 0.171.0-alpha.13.2，macOS arm64，隔离的 `CODEX_HOME`，包由 `tools/package` 真实组装）
+
+| 项 | 结果 |
+|---|---|
+| `codex plugin marketplace add`（本地路径，`.agents/plugins/marketplace.json`，来源 `local`） | 成功，识别出 `craft@<marketplace>` |
+| `codex plugin add` | 成功，状态 `installed, enabled`；缓存路径 `plugins/cache/<marketplace>/craft/0.1.0/`，与文档一致 |
+| 双清单并存 | 缓存里 `.claude-plugin/` 与 `.codex-plugin/` 同在，Codex 不受影响 |
+| 可执行位 | 缓存里 `bin/craft` 与各系统二进制保持 `rwxr-xr-x`（本地路径来源） |
+| 缓存里的启动器 | `sh bin/craft version` 正确转交 `darwin-arm64` 二进制 |
+| SessionStart hook 命令（按 Codex 的 unix 形式执行：`PLUGIN_ROOT` + `sh`） | 输出合法的 `hookSpecificOutput`，`additionalContext` 里是**真实二进制的绝对路径**（`bin/<系统>-<架构>/craft`）——Codex 的 `bin/` 不在 PATH 上，靠它让模型能调用 craft |
+
 ### 仍待验证（实现 M6/M7 时逐项实测，结论写进 `hosts/README.md`）
 
 1. **Windows 上只有 PowerShell、没有 Git Bash** 的 Claude Code：hook 里的 `sh` 找不到，该 hook 会被跳过；核心功能（skill 调 `craft`）不受影响，但要确认 `craft.exe` 在 PowerShell 里确实按 PATHEXT 被解析到，以及 Git Bash 下 `craft` 能转交 `craft.exe`。需要 Windows 环境。
-2. **Codex** 一侧全部未实测：升级后是否重新审阅 hook（改动的是二进制而非 hook 定义时）；`git-subdir`/`url` 来源安装这个目录布局；可执行位是否保留；`commandWindows`；SessionStart 绝对路径注入。
+2. **Codex** 一侧仍待验证（需要交互式或带认证的会话）：首次安装后 hook 的人工审阅与信任流程；升级后是否重新审阅 hook（改动的是二进制而非 hook 定义时）；`git-subdir`/`url` 来源（而不是本地路径）安装这个目录布局后可执行位是否保留；Windows 上的 `commandWindows`；Codex 真实会话里 hook 是否被触发并把上下文交给模型。
 3. SessionStart 的 `hookSpecificOutput.additionalContext` 输出（Claude Code 与 Codex），用真实宿主跑一遍。
 4. 包体积随功能增长后是否触及任何宿主的限制。
