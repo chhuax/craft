@@ -70,10 +70,10 @@ func TestDaemonStateQuotaAndNamespace(t *testing.T) {
 		_, err := h(t.Context(), "state/set", []byte(fmt.Sprintf(`{"key":%q,"value":%q}`, key, value)))
 		return err
 	}
-	if !errors.Is(set("large", strings.Repeat("x", maxStateValue)), exthost.ErrInvalidParams) {
+	if !errors.Is(set("large", strings.Repeat("x", 4<<10)), exthost.ErrInvalidParams) {
 		t.Fatal("大值未拒绝")
 	}
-	for i := range maxStateKeys {
+	for i := range exthost.MaxStateKeys {
 		checkErr(t, set(fmt.Sprint(i), "cursor"))
 	}
 	if !errors.Is(set("overflow", "x"), exthost.ErrInvalidParams) {
@@ -84,7 +84,7 @@ func TestDaemonStateQuotaAndNamespace(t *testing.T) {
 		handler exthost.Handler
 		keys    int
 		value   string
-	}{{other, 0, "null"}, {h, maxStateKeys, `"changed"`}} {
+	}{{other, 0, "null"}, {h, exthost.MaxStateKeys, `"changed"`}} {
 		handler := tc.handler
 		v, err := handler(t.Context(), "state/get", []byte(`{"key":"0"}`))
 		checkErr(t, err)

@@ -153,17 +153,7 @@ func (d *Daemon) loadOutboxCounts(ctx context.Context) error {
 // Outbound 返回本次装载的外发服务，仅在 Start 成功后使用。
 func (d *Daemon) Outbound() *outbound.Service { return d.outbound }
 
-func (h extensionRoutes) recentReceipts(ctx context.Context, raw json.RawMessage) (any, error) {
-	var p struct {
-		After int64 `json:"afterSentSeq"`
-		Limit int   `json:"limit"`
-	}
-	if err := params(raw, &p); err != nil {
-		return nil, err
-	}
-	if p.After < 0 || p.Limit <= 0 {
-		return nil, invalid("回执游标或条数无效")
-	}
+func (h extensionRoutes) recentReceipts(ctx context.Context, p *exthost.RecentReceipts) (any, error) {
 	items := []json.RawMessage{}
 	err := h.db.View(ctx, func(r store.SQLiteReader) error {
 		rows, err := r.Lookup("outboxReceipts", h.id, p.After, p.Limit)
