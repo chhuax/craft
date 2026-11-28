@@ -20,6 +20,16 @@ func threadMeta(t *testing.T, s engine.Store) {
 	custom := engine.Fact{Value: json.RawMessage(`{"count":9007199254740993}`), Label: "计数", Problem: &problem}
 	var events []engine.Event
 	s.Subscribe(func(ev engine.Event) { events = append(events, ev) })
+	// patch 只有对象键，不能凭补丁构造新的来源引用。
+	must(t, e.PatchThreadMeta(ctx, key, map[string]json.RawMessage{"label": json.RawMessage(`"尚未描述"`)}))
+	must(t, s.Read(ctx, func(r engine.Reader) error {
+		th, err := r.GetThread(key)
+		must(t, err)
+		if th != nil || len(events) != 0 {
+			t.Fatalf("未知对象的补丁产生状态或广播 %+v %v", th, events)
+		}
+		return nil
+	}))
 	must(t, e.DescribeThread(ctx, ref, &label, nil, map[string]*engine.Fact{"title": &title, "custom": &custom}))
 	must(t, e.DescribeThread(ctx, ref, nil, &url, map[string]*engine.Fact{"title": nil, "due": {Value: json.RawMessage(`"2026-05-01"`)}}))
 	must(t, e.PatchThreadMeta(ctx, key, map[string]json.RawMessage{"label": json.RawMessage(`"更新"`)}))

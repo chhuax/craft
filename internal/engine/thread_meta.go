@@ -45,7 +45,7 @@ func (e *Engine) DescribeThread(ctx context.Context, ref ThreadRef, label, url *
 	return nil
 }
 
-// PatchThreadMeta 依对象键合并已知的 label、url；null 删除对应值。
+// PatchThreadMeta 依对象键合并已知的 label、url；null 删除对应值。对象缺失时跳过。
 // facts 必须经 DescribeThread 传入，以免误把增量事实解释成整组替换。
 func (e *Engine) PatchThreadMeta(ctx context.Context, key string, patch map[string]json.RawMessage) error {
 	err := e.cfg.Store.Atomic(ctx, func(u Unit) error {
