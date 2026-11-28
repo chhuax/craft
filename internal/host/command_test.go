@@ -77,6 +77,7 @@ func TestRunFiltersEnvironment(t *testing.T) {
 	t.Setenv("CRAFT_HOME", dir)
 	t.Setenv("PRIVATE_TOKEN", "parent-secret")
 	t.Setenv(EnvSessionID, "stale-session")
+	t.Setenv("USER", "account-name")
 	env := BindingEnv(Session{Host: "test"}, map[string]string{EnvWork: "work", EnvAssignment: "a", EnvHost: "fake-host", EnvSessionID: "forged", "PATH": "fake-path"})
 	prompt := strings.Repeat("-文字", 20000)
 	out, _, err := Run(t.Context(), os.Args[0], dir, []string{"echo-env"}, env, prompt, 10*time.Second)
@@ -88,7 +89,8 @@ func TestRunFiltersEnvironment(t *testing.T) {
 			t.Fatalf("子进程收到了 %q", part)
 		}
 	}
-	for _, part := range []string{prompt, EnvWork + "=work", EnvAssignment + "=a", EnvHost + "=test"} {
+	// 账户名必须透传：宿主靠它定位登录凭据。
+	for _, part := range []string{prompt, EnvWork + "=work", EnvAssignment + "=a", EnvHost + "=test", "USER=account-name"} {
 		if !strings.Contains(out, part) {
 			t.Error("子进程缺少正文或绑定变量")
 		}

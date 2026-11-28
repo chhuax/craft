@@ -17,9 +17,11 @@ import (
 
 var _ host.Driver = (*Driver)(nil)
 
-// Capabilities 声明建会话与派工首条分开，忙时可向本实例持有的流追加。
+// Capabilities 声明建会话时直接带首条：不带正文的 --bg 只会建出没有对话记录的
+// 空会话，之后既不能 --resume，也没有别的投递入口（实测 Claude Code 2.1.x）。
+// 忙时可向本实例持有的流追加。
 func (*Driver) Capabilities() host.Capabilities {
-	return host.Capabilities{CreateSeparatesPrompt: true, BusyAppend: true, StopHook: true, SessionStatus: true, LastReply: true}
+	return host.Capabilities{BusyAppend: true, StopHook: true, SessionStatus: true, LastReply: true}
 }
 
 var backgroundID = regexp.MustCompile(`(?m)^\s*backgrounded\s*[·:\-]\s*([0-9a-fA-F]{6,32})(?:\s|$)`)
@@ -66,18 +68,17 @@ func (d *Driver) createdID(ctx context.Context, out string) (string, error) {
 	return id, nil
 }
 
-// Create 只让 --bg 建立后台会话。业务正文必须在完整 UUID 登记成功后通过 stdin 发送。
-// 登记拒绝或后续追加失败时仍返回已知的 Session，便于调用方停止或人工核对。
+// Create 用 --bg 建立后台会话，首条正文（带投递标记）直接作为 --bg 的提示词，
+// 因此调用方无法在首条发出前先登记会话；登记拒绝时仍返回已知的 Session，便于调用方停止或人工核对。
 func (d *Driver) Create(ctx context.Context, spec host.CreateSpec) (host.Session, error) {
 	if !filepath.IsAbs(spec.Directory) || strings.HasPrefix(spec.Title, "-") || strings.ContainsAny(spec.Title, "\x00\r\n") {
 		return host.Session{}, fmt.Errorf("%w: 工作目录或标题无效", host.Unsupported)
 	}
+	marked := ""
 	if spec.Prompt != "" || spec.DeliveryID != "" {
-		if _, err := host.MarkDelivery(spec.DeliveryID, spec.Prompt); err != nil {
+		var err error
+		if marked, err = host.MarkDelivery(spec.DeliveryID, spec.Prompt); err != nil {
 			return host.Session{}, err
-		}
-		if spec.OnCreated == nil {
-			return host.Session{}, fmt.Errorf("%w: 发送首条前须登记会话", host.Unsupported)
 		}
 	}
 	perms, err := permissionArgs(spec.Permissions, spec.Directory)
@@ -90,6 +91,10 @@ func (d *Driver) Create(ctx context.Context, spec host.CreateSpec) (host.Session
 	}
 	args := append([]string{"--bg", "--name", title}, perms...)
 	args = append(args, "--output-format", "json")
+	if marked != "" {
+		// "--" 之后全是位置参数，正文以 "-" 开头也不会被当成选项。
+		args = append(args, "--", marked)
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(d.life, cancel)
 	defer stop()
@@ -122,12 +127,6 @@ func (d *Driver) Create(ctx context.Context, spec host.CreateSpec) (host.Session
 		d.mu.Lock()
 		d.specs[id] = host.CreateSpec{Directory: spec.Directory, Permissions: perms, Env: binding}
 		d.mu.Unlock()
-	}
-	if spec.Prompt != "" {
-		r := d.Append(ctx, s, spec.Prompt, spec.DeliveryID)
-		if r.Outcome != host.OK {
-			return s, fmt.Errorf("发送首条: %w", errors.Join(r.Outcome, r.Err))
-		}
 	}
 	return s, nil
 }
