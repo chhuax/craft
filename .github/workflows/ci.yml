@@ -20,6 +20,9 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+      - name: 组装并校验五目标通用包（假构建）
+        if: runner.os == 'Linux'
+        run: go test -count=1 ./tools/package -run '^TestUniversalPackage$'
 
   lint:
     runs-on: ubuntu-latest

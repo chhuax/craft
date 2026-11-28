@@ -1,11 +1,13 @@
 # 插件包构建
 
-本目录将在宿主适配就绪后承担下面几项工作。包只有一个，两个宿主共用，布局与取舍见 [ADR 0004](../../docs/adr/0004-single-universal-package.md)。
+在仓库根运行 `make plugin VERSION=1.2.3`，得到 `dist/plugin/`。也可指定版本和输出目录。
 
-1. 按目标系统和架构编译 CLI（`darwin-arm64`、`darwin-amd64`、`linux-amd64`、`linux-arm64`、`windows-amd64`），注入发布版本，用 `-trimpath -ldflags "-s -w"`。
-2. 把二进制放进包的 `bin/`：Windows 的放 `bin/craft.exe`，其余放 `bin/<系统>-<架构>/craft`；放入 POSIX sh 启动器 `bin/craft`，保证可执行位。
-3. 从 `hosts/` 复制两个宿主的清单、共用的 `skills/` 与各自的 hook 文件，写入 `VERSION`、`LICENSE`、`NOTICE`。
-4. 校验：`claude plugin validate`、清单与 hook 路径存在性、`craft version` 与 `VERSION` 一致、可执行位。
-5. 把整个目录提交到分发仓库并打 tag（见 ADR 0004 的「分发」一节）。
+```sh
+go run ./tools/package --version 1.2.3 --out dist/plugin
+```
 
-**不做**按系统渲染入口，也不产出「宿主 × 系统」的归档矩阵。
+默认构建 darwin/arm64、darwin/amd64、linux/amd64、linux/arm64、windows/amd64。开发时可用 `--targets` 传入逗号分隔的目标列表，例如 `--targets linux/amd64,windows/amd64`。Codex 的 `commandWindows` 固定引用 `bin/craft.exe`，裁剪目录缺少该文件时会报引用错误。发布使用全部五个目标。清单、hook、共用 skill 与二进制的布局见 [ADR 0004](../../docs/adr/0004-single-universal-package.md)。
+
+工具注入同一个版本号，固定目录与文件的修改时间，设置普通文件和入口权限，再校验 JSON、路径引用、版本和本机目标的实际输出。每个二进制超过 16 MiB 或包总量超过 80 MiB 时报告体积警告。PATH 上有 Claude Code 时在隔离配置目录运行 `claude plugin validate`，缺少该命令或本机目标时，报告会标明跳过的检查。
+
+组装与校验均成功后才替换输出目录。分发仓库提交与打 tag 由发布流程负责。

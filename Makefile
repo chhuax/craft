@@ -1,4 +1,6 @@
-.PHONY: build test lint fmt tidy release-snapshot
+.PHONY: build test lint fmt tidy release-snapshot plugin
+
+VERSION ?= 0.0.0-dev
 
 build:
 	go build -o bin/craft$(shell go env GOEXE) ./cmd/craft
@@ -18,3 +20,6 @@ tidy:
 
 release-snapshot:
 	goreleaser release --snapshot --clean
+
+plugin:
+	go run ./tools/package --version "$(VERSION)" --out dist/plugin
