@@ -14,7 +14,7 @@
 {
   "id": "github",                      // 全局唯一；扩展之间禁止互相依赖
   "version": "0.1.0",
-  "protocol": "1",
+  "protocol": 1,
   "exec": ["./craft-ext-github"],       // 启动命令，工作目录为扩展目录
   "requires": [],                      // 依赖的其他扩展 id，运行时经内核协作，不得 import
   "alarms": [
