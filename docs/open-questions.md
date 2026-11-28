@@ -26,3 +26,4 @@
 | Q10 | 多用户/团队模式是否路线图内 | 不在 v1，保留「状态目录隔离」即可 |
 | Q11 | 扩展分发与签名：registry？还是纯本地目录安装 | v1 纯本地目录，不做 registry |
 | Q13 | 知识沉淀（knowledge）是否进开源范围；craft 的知识源端口默认实现只读仓库内文档 | 不进 v1，作为扩展另行决定 |
+| Q16 | `attention()` 的 `suggestion` 与 `health` 两类：数据不在 Work/Thread/Decision 里（健康来自 effect 层与扩展的健康上报，建议来自盘点），M3a 的纯函数只产出能从引擎状态推导的六类。做法倾向：这两类由 app 层产出同一 `AttentionItem` 类型，与引擎结果合并排序，`attention()` 保持纯函数 | M3d（effect 健康）时补合并函数；`suggestion` 随盘点放 v1.1 |
