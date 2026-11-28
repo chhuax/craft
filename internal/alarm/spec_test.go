@@ -17,7 +17,11 @@ func TestAlarmSpec(t *testing.T) {
 		{"23:59", 0, true}, {"00:00", 0, true}, {"", time.Nanosecond, true},
 	} {
 		spec := AlarmSpec{ID: "a", Every: tc.every, At: tc.at, Run: func(context.Context, RunRequest) error { return nil }}
-		if _, err := spec.validate(); (err == nil) != tc.valid {
+		s, err := NewService(Config{GlobalLimit: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Register(spec); (err == nil) != tc.valid {
 			t.Errorf("Every=%v At=%q: %v", tc.every, tc.at, err)
 		}
 	}

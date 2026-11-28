@@ -18,7 +18,7 @@ import (
 func TestStandardLibraryOnly(t *testing.T) {
 	root := os.DirFS(filepath.Join("..", ".."))
 	imports := make(map[string][]string)
-	for _, dir := range []string{"internal/engine", "internal/method"} {
+	for _, dir := range []string{"internal/alarm", "internal/engine", "internal/method"} {
 		err := fs.WalkDir(root, dir, func(name string, entry fs.DirEntry, err error) error {
 			if err != nil || entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 				return err
