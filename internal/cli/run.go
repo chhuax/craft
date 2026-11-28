@@ -95,6 +95,7 @@ func commands() []commandSpec {
 		{"watch attach", "<work> <trigger>", "", person, attach},
 		{"watch unsubscribe", "<thread-key>", "", person, unsubscribe},
 		{"watch dismiss", "<decision>", "", person, dismiss},
+		{"watch turn-ended", "", "", worker, turnEnded},
 		{"watch report", "<state>", "--summary T [--question Q]", worker, report},
 		{"watch handback", "<trigger>", "--reason T", worker, handback},
 		{"watch note", "", "--text T", worker, note},

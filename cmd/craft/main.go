@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 
+	"github.com/chhuax/craft/internal/app"
 	"github.com/chhuax/craft/internal/cli"
 )
 
@@ -10,5 +11,5 @@ import (
 var version = "dev"
 
 func main() {
-	os.Exit(cli.Run(os.Args[1:], version, os.Stdout, os.Stderr))
+	os.Exit(cli.RunWithContext(os.Args[1:], version, os.Stdout, os.Stderr, cli.CommandContext{Session: app.SessionFromEnv(os.Getenv)}))
 }

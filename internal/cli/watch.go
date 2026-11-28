@@ -170,3 +170,15 @@ func setPolicy(i *invocation) (_ result, err error) {
 	p, err := c.SetPolicy(i.ctx, []byte(i.args[0]))
 	return result{payload: p}, err
 }
+
+func turnEnded(i *invocation) (_ result, err error) {
+	c, err := app.OpenCommands(i.ctx, i.home, i.clock, nil)
+	if err != nil {
+		return result{}, err
+	}
+	defer func() { err = errors.Join(err, c.Close()) }()
+	if err = c.WorkerTurnEnded(i.ctx, *i.binding); err != nil {
+		return result{}, err
+	}
+	return data(map[string]bool{"accepted": true})
+}
