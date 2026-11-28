@@ -121,7 +121,8 @@ func (e *Engine) decide(u Unit, out Outcome, p Policy, now string) (Decision, er
 	}
 	switch out.Kind {
 	case Accept:
-		return e.admit(u, th, ev, out, p, now)
+		decision, _, err := e.admit(u, th, ev, out, p, now, tr, nil)
+		return decision, err
 	case Stop:
 		return decideStop(u, th, ev, out, now)
 	case Ignore, Unavailable:
@@ -191,44 +192,50 @@ func decideStop(u Unit, th *Thread, ev *Evaluation, out Outcome, now string) (De
 	return finishEval(u, th, ev, d)
 }
 
-func (e *Engine) admit(u Unit, th *Thread, ev *Evaluation, out Outcome, p Policy, now string) (Decision, error) {
+func (e *Engine) admit(u Unit, th *Thread, ev *Evaluation, out Outcome, p Policy, now string, tr *Trigger, knownWorks map[string]*Work) (Decision, *Work, error) {
 	admission := p.Admits(*ev, out.Rules)
 	if admission == AdmitRefuse {
-		return Decision{}, &UserError{Code: CodeNotExplicit}
+		return Decision{}, nil, &UserError{Code: CodeNotExplicit}
 	}
-	triggers, err := u.GetTriggers(ev.TriggerIDs...)
+	ids := slices.DeleteFunc(slices.Clone(ev.TriggerIDs), func(id string) bool { return id == tr.ID })
+	triggers, err := u.GetTriggers(ids...)
 	if err != nil {
-		return Decision{}, err
+		return Decision{}, nil, err
 	}
+	if triggers == nil {
+		triggers = make(map[string]*Trigger)
+	}
+	triggers[tr.ID] = tr
 	primary := triggers[primaryID(ev)]
 	if primary == nil {
-		return Decision{}, fmt.Errorf("研判 %q 缺少主事件", ev.ID)
+		return Decision{}, nil, fmt.Errorf("研判 %q 缺少主事件", ev.ID)
 	}
 	title := assessmentTitle(th, primary.Text)
 	out.Scope = cmp.Or(out.Scope, title)
 	if admission == AdmitObserve {
 		out = observed(out, title, th.Key)
-		return finishEval(u, th, ev, Decision{Kind: Ignore, At: now, Reason: []Reason{out.Reason}, Audit: out.Audit})
+		d, err := finishEval(u, th, ev, Decision{Kind: Ignore, At: now, Reason: []Reason{out.Reason}, Audit: out.Audit})
+		return d, nil, err
 	}
 	w := Work{ID: Key("work", ev.ID), Title: title, Mandate: mandateOf(ev, out), CreatedAt: now, UpdatedAt: now, Origin: Origin{TriggerID: primary.ID, TriggerIDs: ev.TriggerIDs}}
 	batch := make([]*Trigger, 0, len(ev.TriggerIDs))
 	for _, id := range ev.TriggerIDs {
 		tr := triggers[id]
 		if tr == nil || len(tr.Threads) == 0 {
-			return Decision{}, fmt.Errorf("批内事件 %q 缺失或无对象", id)
+			return Decision{}, nil, fmt.Errorf("批内事件 %q 缺失或无对象", id)
 		}
 		batch = append(batch, tr)
 	}
-	if _, err := e.routeWork(u, &w, th, batch, now, false); err != nil {
-		return Decision{}, err
+	if _, err := e.routeWork(u, &w, th, batch, now, false, knownWorks); err != nil {
+		return Decision{}, nil, err
 	}
 	d, err := finishEval(u, th, ev, Decision{At: now, Kind: Accept, Reason: outcomeReasons(out, ev), Audit: out.Audit, WorkID: w.ID, Mandate: &w.Mandate})
 	if err != nil {
-		return Decision{}, err
+		return Decision{}, nil, err
 	}
 	w.DecisionID = d.ID
 	if err := launchWork(u, &w, batch, now); err != nil {
-		return Decision{}, err
+		return Decision{}, nil, err
 	}
-	return d, nil
+	return d, &w, nil
 }

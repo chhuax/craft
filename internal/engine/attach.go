@@ -49,7 +49,7 @@ func (e *Engine) Attach(ctx context.Context, workID, triggerID, note string) (Wo
 			return evalFinished(d.EvalID)
 		}
 		resuming := w.Ended != nil && tr.Human && p.ModeOf(tr.Source, tr.Event) != ModeOff
-		threads, err := e.routeWork(u, w, th, []*Trigger{tr}, now, resuming)
+		threads, err := e.routeWork(u, w, th, []*Trigger{tr}, now, resuming, nil)
 		if err != nil {
 			return err
 		}

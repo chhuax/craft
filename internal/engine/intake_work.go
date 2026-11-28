@@ -59,7 +59,7 @@ func fanoutTrigger(u Unit, tr Trigger, keys []string, threads map[string]*Thread
 			if err := loadFollowThreads(u, w, threads); err != nil {
 				return nil, "", err
 			}
-			if err := checkOwnAvailable(u, closableFollows(w, threads, scope), w.ID); err != nil {
+			if err := checkOwnAvailable(u, closableFollows(w, threads, scope), w.ID, works); err != nil {
 				var rejection *UserError
 				if errors.As(err, &rejection) && rejection.Code == CodeThreadAlreadyOwned {
 					// 旧工作不能恢复时，仍要向本次事件的其他在办订阅者投递。

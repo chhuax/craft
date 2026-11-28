@@ -5,22 +5,31 @@ import (
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 )
 
 // 调用方已在写事务中读出可关闭对象。只沿订阅查询潜在持有人，
 // 不能用 Work 的阶段代替 ended，也不能把纯跟随或工作自身视作冲突。
-func checkOwnAvailable(r Reader, threads []*Thread, workID string) error {
+func checkOwnAvailable(r Reader, threads []*Thread, workID string, works map[string]*Work) error {
 	var ids []string
 	for _, th := range threads {
-		ids = append(ids, th.Subscriptions...)
+		for _, id := range th.Subscriptions {
+			if _, loaded := works[id]; !loaded && id != workID {
+				ids = append(ids, id)
+			}
+		}
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	works, err := r.GetWorks(ids...)
-	if err != nil {
-		return err
+	if len(ids) > 0 {
+		found, err := r.GetWorks(uniqueIDs(ids)...)
+		if err != nil {
+			return err
+		}
+		if works == nil {
+			works = found
+		} else {
+			maps.Copy(works, found)
+		}
 	}
 	for _, th := range threads {
 		for _, id := range th.Subscriptions {
@@ -37,7 +46,7 @@ func checkOwnAvailable(r Reader, threads []*Thread, workID string) error {
 }
 
 // 主对象必须复用命令持有的聚合，避免后续清除 evaluating 时覆盖刚登记的订阅。
-func (e *Engine) routeWork(u Unit, w *Work, main *Thread, batch []*Trigger, now string, resuming bool) (map[string]*Thread, error) {
+func (e *Engine) routeWork(u Unit, w *Work, main *Thread, batch []*Trigger, now string, resuming bool, knownWorks map[string]*Work) (map[string]*Thread, error) {
 	if e.cfg.Scope == nil {
 		return nil, errors.New("登记自有对象需要 SourceScope")
 	}
@@ -59,6 +68,7 @@ func (e *Engine) routeWork(u Unit, w *Work, main *Thread, batch []*Trigger, now 
 			loadKeys = append(loadKeys, f.Thread)
 		}
 	}
+	loadKeys = slices.DeleteFunc(uniqueIDs(loadKeys), func(key string) bool { return key == main.Key })
 	threads, err := u.GetThreads(loadKeys...)
 	if err != nil {
 		return nil, err
@@ -80,7 +90,7 @@ func (e *Engine) routeWork(u Unit, w *Work, main *Thread, batch []*Trigger, now 
 	if resuming {
 		owned = append(owned, closableFollows(w, threads, e.cfg.Scope)...)
 	}
-	if err := checkOwnAvailable(u, owned, w.ID); err != nil {
+	if err := checkOwnAvailable(u, owned, w.ID, knownWorks); err != nil {
 		return nil, err
 	}
 	for _, key := range keys {
@@ -170,5 +180,5 @@ func launchWork(u Unit, w *Work, batch []*Trigger, now string) error {
 		map[string]any{"workId": w.ID, "decisionId": w.DecisionID, "strength": w.Mandate.Strength}); err != nil {
 		return err
 	}
-	return enqueueAssessment(u, "launch", a.ID, map[string]string{"assignmentId": a.ID, "workId": w.ID})
+	return enqueueLaunch(u, w.ID, a.ID)
 }

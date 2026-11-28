@@ -22,7 +22,7 @@ func emitTrigger(u Unit, kind, id, key, now string) error {
 	return emitAssessment(u, kind, now, map[string]string{"thread": key, "trigger": id}, map[string]any{"triggerId": id})
 }
 
-func enqueueAssessment(u Unit, kind, key string, data map[string]string) error {
+func enqueueAssessment(u Unit, kind, key string, data any) error {
 	raw, err := jsonv2.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("编码 %s 请求: %w", kind, err)

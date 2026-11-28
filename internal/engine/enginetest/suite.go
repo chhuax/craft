@@ -16,6 +16,21 @@ func Run(t *testing.T, factory func(t *testing.T) engine.Store) {
 		name  string
 		check func(*testing.T, engine.Store)
 	}{
+		{"只读订阅上的人工请求与回滚", requestLifecycle},
+		{"退订后重复发起", requestUnsubscribedOrigin},
+		{"已排队的人工请求", requestAlreadyPending},
+		{"停止会话缺失的回滚", closeWithoutSession},
+		{"已关闭自有对象的结果", closeWithPriorOwnFact},
+		{"重绑后的关闭重放", reboundClose},
+		{"关闭与重开联动", propagateClose},
+		{"人工停止与事务回滚", stopAtomic},
+		{"重试派工", workRetry},
+		{"人工请求与忽略故障", humanDecisions},
+		{"退回挂接的自动事件", returnAttachedSignal},
+		{"保留起源订阅", originSubscription},
+		{"工作订阅", workSubscriptions},
+		{"撤销自动绑定", returnedFollows},
+		{"共同认领的退回", sharedHandback},
 		{"研判攒批与重排", evaluationBatch},
 		{"暂停研判", evaluationPaused},
 		{"研判预检", evaluationPreflight},

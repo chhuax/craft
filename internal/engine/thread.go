@@ -14,12 +14,12 @@ func threadOrNew(th *Thread, ref ThreadRef, now string) *Thread {
 	return &Thread{Key: ThreadKey(ref), Ref: ref, CreatedAt: now}
 }
 
-// ThreadClosed 记录对象本身的关闭事实，较早的状态通知不覆盖已知事实。
+// ThreadClosed 记录关闭事实，并在同一事务内更新订阅工作的 Follow 与结束状态。
 func (e *Engine) ThreadClosed(ctx context.Context, ref ThreadRef, outcome, at, detail string) error {
 	return e.setThreadStatus(ctx, ref, at, &ThreadClose{Outcome: outcome, Detail: detail})
 }
 
-// ThreadReopened 保留重开的水位，即使该对象此前从未关闭也能抵御迟到的关闭。
+// ThreadReopened 清除在办工作的关闭标记，并保留重开时间以抵御迟到的关闭。
 func (e *Engine) ThreadReopened(ctx context.Context, ref ThreadRef, at string) error {
 	return e.setThreadStatus(ctx, ref, at, nil)
 }
@@ -27,6 +27,10 @@ func (e *Engine) ThreadReopened(ctx context.Context, ref ThreadRef, at string) e
 func (e *Engine) setThreadStatus(ctx context.Context, ref ThreadRef, at string, closed *ThreadClose) error {
 	key := ThreadKey(ref)
 	err := e.cfg.Store.Atomic(ctx, func(u Unit) error {
+		_ = e.cfg.Policy()
+		if closed != nil && closed.Outcome != "done" && closed.Outcome != "closed" {
+			return fmt.Errorf("未知关闭结果 %q", closed.Outcome)
+		}
 		when, err := IsoTime(at)
 		if err != nil {
 			return fmt.Errorf("规范化状态时间: %w", err)
@@ -46,14 +50,16 @@ func (e *Engine) setThreadStatus(ctx context.Context, ref ThreadRef, at string, 
 		}
 		kind := "thread.reopened"
 		if closed == nil {
-			if th.Closed == nil && th.ReopenedAt == when {
+			// 同毫秒无法区分先后，以关闭为准，使乱序重放也得到相同结果。
+			if when == last {
 				return nil
 			}
 			th.ReopenedAt = when
 		} else {
 			closed.At = when
-			if th.Closed != nil && *th.Closed == *closed {
-				return nil
+			if sameClose(th.Closed, closed) {
+				// 同一事实无需再次广播，但手工重绑可能发生在两次相同通知之间。
+				return propagateThreadStatus(u, th, now)
 			}
 			kind = "thread.closed"
 		}
@@ -61,8 +67,10 @@ func (e *Engine) setThreadStatus(ctx context.Context, ref ThreadRef, at string, 
 		if err := u.PutThread(*th); err != nil {
 			return err
 		}
-		// Works 生命周期应在此处、同一事务内传播已接受的事实，较早事实不能触及 Follow。
-		return emitThread(u, kind, key, now)
+		if err := emitThread(u, kind, key, now); err != nil {
+			return err
+		}
+		return propagateThreadStatus(u, th, now)
 	})
 	if err != nil {
 		return fmt.Errorf("更新 Thread %q 状态: %w", key, err)
