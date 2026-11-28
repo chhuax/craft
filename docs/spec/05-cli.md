@@ -76,8 +76,8 @@ craft alarm list
 craft alarm run <ext> <alarm> [--wait [SEC]]    # 入队，默认立即返回 {queued, requestId}；--wait 轮询终态
 
 # 对外写（见 04）
-craft act <action> --params JSON [--yes]
-craft outbox list|show|confirm|withdraw
+craft act <action> --params JSON [--yes] [--key K] [--target NAME]
+craft outbox list|show|confirm [--yes] [--target NAME]|withdraw   # --target 是人点名要做的对象，confirm_named 级别必须与预览里的目标一致
 
 # 扩展
 craft ext list|enable|disable|logs <id>

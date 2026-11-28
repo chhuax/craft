@@ -26,7 +26,9 @@ type actionParams struct {
 
 func outboundCommand(i *invocation) (result, error) {
 	_, yes := i.flags["--yes"]
-	p := actionParams{Yes: yes, IdempotencyKey: i.flags["--key"]}
+	// --target 是人「点名」要做的具体对象（04 §2 的 confirm_named）：必须与预览里的目标一致，
+	// 不点名或点错一律被拒。没有这个入口，confirm_named 级别的动作从命令行就永远执行不了。
+	p := actionParams{Yes: yes, IdempotencyKey: i.flags["--key"], NamedTarget: i.flags["--target"]}
 	if i.binding != nil {
 		// 绑定只来自进程入口。即使调用者带 --yes，也必须把后台语义传到 daemon。
 		p.Source = outbound.Worker

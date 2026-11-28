@@ -332,6 +332,11 @@ func TestNamedTargetAndRuleReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	actionCommand(t, nil, 3, "act", "named", "--params", "{}", "--key", "recheck")
+	// CLI 的点名入口：缺点名、点错都被拒（退出码 4），点对才放行。
+	actionCommand(t, nil, 3, "act", "named", "--params", "{}", "--key", "viaCLI")
+	actionCommand(t, nil, 4, "outbox", "confirm", "viaCLI", "--yes")
+	actionCommand(t, nil, 4, "outbox", "confirm", "viaCLI", "--yes", "--target", "other")
+	actionCommand(t, nil, 0, "outbox", "confirm", "viaCLI", "--yes", "--target", "one")
 	stop()
 	if err := os.WriteFile(filepath.Join(home, "outbound.json"), []byte(`{"organization":{"named":"deny"}}`), 0600); err != nil {
 		t.Fatal(err)
