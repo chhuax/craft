@@ -59,6 +59,10 @@ func (r sqliteRead) List(collection, filter string) (_ map[string]json.RawMessag
 	return result, nil
 }
 
+func putQuery(table string) string {
+	return "INSERT INTO " + table + " (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+}
+
 func (t *sqliteTx) Put(collection, key string, value json.RawMessage) error {
 	table, _, err := migrate.Resolve(collection, All)
 	if err != nil {
@@ -68,11 +72,40 @@ func (t *sqliteTx) Put(collection, key string, value json.RawMessage) error {
 		return err
 	}
 	// 显式绑定 TEXT，直接传 RawMessage 会绑定为 BLOB 并改变 SQLite 的 JSON 解析语义。
-	query := "INSERT INTO " + table + " (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-	if _, err := t.tx.ExecContext(t.ctx, query, key, string(value)); err != nil {
+	if _, err := t.tx.ExecContext(t.ctx, putQuery(table), key, string(value)); err != nil {
 		return fmt.Errorf("写入 %s[%q]: %w", table, key, err)
 	}
 	return nil
+}
+
+func (t *sqliteTx) PutMany(collection string, docs []Doc) (err error) {
+	if len(docs) == 0 {
+		return nil
+	}
+	table, err := validateDocs(collection, docs)
+	if err != nil {
+		return err
+	}
+	stmt, err := t.tx.PrepareContext(t.ctx, putQuery(table))
+	if err != nil {
+		return fmt.Errorf("准备批量写入 %s: %w", table, err)
+	}
+	defer func() {
+		if e := stmt.Close(); e != nil {
+			err = errors.Join(err, fmt.Errorf("关闭集合 %s 的写入语句: %w", table, e))
+		}
+	}()
+
+	// SQLite 还会拒绝嵌套过深等通过 Go 校验的 JSON。用保存点撤销此前的写入，
+	// 以便调用方处理错误后仍可提交同一事务内的其他修改。
+	return t.Atomic(t.ctx, func(Tx) error {
+		for _, doc := range docs {
+			if _, err := stmt.ExecContext(t.ctx, doc.Key, string(doc.Value)); err != nil {
+				return fmt.Errorf("写入 %s[%q]: %w", table, doc.Key, err)
+			}
+		}
+		return nil
+	})
 }
 
 func (t *sqliteTx) Delete(collection, key string) error {

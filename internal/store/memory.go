@@ -139,17 +139,23 @@ func (r memoryRead) List(collection, filter string) (map[string]json.RawMessage,
 }
 
 func (tx *memoryTx) Put(collection, key string, value json.RawMessage) error {
-	table, _, err := migrate.Resolve(collection, All)
-	if err != nil {
-		return err
+	return tx.PutMany(collection, []Doc{{Key: key, Value: value}})
+}
+
+func (tx *memoryTx) PutMany(collection string, docs []Doc) error {
+	if len(docs) == 0 {
+		return nil
 	}
-	if err := validateJSON(collection, key, value); err != nil {
+	table, err := validateDocs(collection, docs)
+	if err != nil {
 		return err
 	}
 	if tx.memoryRead[table] == nil {
 		tx.memoryRead[table] = make(map[string]json.RawMessage)
 	}
-	tx.memoryRead[table][key] = bytes.Clone(value)
+	for _, doc := range docs {
+		tx.memoryRead[table][doc.Key] = bytes.Clone(doc.Value)
+	}
 	return nil
 }
 
