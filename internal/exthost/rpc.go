@@ -28,6 +28,9 @@ func (unavailableError) Retryable() bool { return true }
 // ErrUnavailable 表示连接已断开，可用 errors.Is 判断，调用方可在重连后重试。
 var ErrUnavailable = unavailableError{}
 
+// ErrLineTooLong 表示一帧超过连接限制，尚未完整解码就已断开。
+var ErrLineTooLong = errors.New("RPC 行超过长度上限")
+
 // ErrMethodNotFound 由 Handler 返回，映射到协议错误 -32601。
 var ErrMethodNotFound = errors.New("未知方法")
 
@@ -67,6 +70,8 @@ type Conn struct {
 	r         io.Reader
 	w         io.Writer
 	handler   Handler
+	observe   func(bool, []byte)
+	observeMu sync.Mutex
 	limit     int
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -87,12 +92,16 @@ type Conn struct {
 // NewConn 即刻开始读消息，maxLine 为零时使用 16 MiB。对可能阻塞的传输端须提供
 // 可中止对应 Read/Write 的 io.Closer，使 Close 能收回后台 goroutine。
 func NewConn(r io.Reader, w io.Writer, handler Handler, maxLine int) *Conn {
+	return newConn(r, w, handler, maxLine, nil)
+}
+
+func newConn(r io.Reader, w io.Writer, handler Handler, maxLine int, observe func(bool, []byte)) *Conn {
 	if maxLine <= 0 {
 		maxLine = 16 << 20
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Conn{
-		r: r, w: w, handler: handler, limit: maxLine,
+		r: r, w: w, handler: handler, limit: maxLine, observe: observe,
 		ctx: ctx, cancel: cancel,
 		pending: map[uint64]chan envelope{},
 		active:  map[string]context.CancelFunc{},
@@ -168,7 +177,7 @@ func (c *Conn) writeLoop() {
 		c.output = nil
 		c.mu.Unlock()
 		for i, b := range batch {
-			n, err := c.w.Write(b)
+			n, err := c.writeLine(b)
 			if err == nil && n != len(b) {
 				err = io.ErrShortWrite
 			}
@@ -178,6 +187,29 @@ func (c *Conn) writeLoop() {
 			}
 			batch[i] = nil
 		}
+	}
+}
+
+func (c *Conn) writeLine(b []byte) (int, error) {
+	if c.observe == nil {
+		return c.w.Write(b)
+	}
+	// 对端可能在 Write 返回的同时发出下一个请求。把完整写出和登记放在同一临界区，
+	// 后续读回调才能看见这个应答；只排队或写失败的应答不能成为游标推进依据。
+	c.observeMu.Lock()
+	defer c.observeMu.Unlock()
+	n, err := c.w.Write(b)
+	if n == len(b) && err == nil {
+		c.observe(false, b)
+	}
+	return n, err
+}
+
+func (c *Conn) observeInput(line []byte) {
+	if c.observe != nil {
+		c.observeMu.Lock()
+		c.observe(true, line)
+		c.observeMu.Unlock()
 	}
 }
 
@@ -271,6 +303,9 @@ func (c *Conn) readLoop() {
 	var scratch []byte
 	for {
 		if _, err := reader.Peek(1); err != nil {
+			if len(scratch) > 0 && errors.Is(err, io.EOF) {
+				c.observeInput(scratch)
+			}
 			c.fail(err)
 			return
 		}
@@ -283,7 +318,7 @@ func (c *Conn) readLoop() {
 			consumed = end + 1
 		}
 		if len(chunk) > c.limit-len(scratch) {
-			c.fail(fmt.Errorf("RPC 行超过 %d 字节", c.limit))
+			c.fail(fmt.Errorf("%w %d 字节", ErrLineTooLong, c.limit))
 			return
 		}
 		switch {
@@ -301,6 +336,7 @@ func (c *Conn) readLoop() {
 }
 
 func (c *Conn) receive(line []byte) {
+	c.observeInput(line)
 	var msg envelope
 	if err := jsonv2.Unmarshal(line, &msg); err != nil {
 		code := -32600

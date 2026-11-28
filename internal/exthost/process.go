@@ -126,27 +126,9 @@ func (h *Host) launch(ctx context.Context) (*child, error) {
 	if m.Protocol != protocolMajor {
 		return nil, fmt.Errorf("%s protocol %d 与内核主版本 %d 不兼容", m.ID, m.Protocol, protocolMajor)
 	}
-	if !validID(m.ID) || len(m.Exec) == 0 || !filepath.IsLocal(m.Exec[0]) {
-		return nil, fmt.Errorf("无效的扩展 id 或 exec[0]")
-	}
-	path := filepath.Join(h.ext.Dir, m.Exec[0])
-	// 在交给 os/exec 之前核对原路径，避免 Windows 按 PATHEXT 补猜后缀。
-	info, err := os.Stat(path)
+	p, err := launchProcess(h.ext, h.opts.LogDir, h.opts.Handler, nil)
 	if err != nil {
 		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("exec %s 须为文件", path)
-	}
-	log, err := openLog(h.opts.LogDir, m.ID)
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.Command(path, m.Exec[1:]...)
-	cmd.Dir = h.ext.Dir
-	p, err := startChild(cmd, log, h.opts.Handler)
-	if err != nil {
-		return nil, fmt.Errorf("启动 %s: %w", m.ID, err)
 	}
 	initCtx, cancel := context.WithTimeout(ctx, h.opts.HandshakeTimeout)
 	defer cancel()
@@ -168,7 +150,54 @@ func (h *Host) launch(ctx context.Context) (*child, error) {
 	return p, nil
 }
 
-func startChild(cmd *exec.Cmd, log *tailLog, handler Handler) (*child, error) {
+// OpenProcess 启动一次独立的协议会话，由调用方负责握手和截止时间。返回的回收函数必须调用一次；传入上下文时，先等候进程自行退出至截止时刻。
+// observe 在读写循环中同步收到协议行（incoming 表示扩展发出），须及时返回，不能保留缓冲区。
+func OpenProcess(ext Extension, logDir string, handler Handler, observe func(incoming bool, line []byte)) (*Conn, func(context.Context) error, error) {
+	p, err := launchProcess(ext, logDir, handler, observe)
+	if err != nil {
+		return nil, nil, err
+	}
+	return p.conn, func(grace context.Context) error {
+		if grace != nil {
+			select {
+			case <-p.exited:
+				return errors.Join(p.waitErr, p.finish())
+			case <-grace.Done():
+				return errors.Join(grace.Err(), p.finish())
+			}
+		}
+		return p.finish()
+	}, nil
+}
+
+func launchProcess(ext Extension, logDir string, handler Handler, observe func(bool, []byte)) (*child, error) {
+	m := ext.Manifest
+	if !validID(m.ID) || len(m.Exec) == 0 || !filepath.IsLocal(m.Exec[0]) {
+		return nil, fmt.Errorf("无效的扩展 id 或 exec[0]")
+	}
+	path := filepath.Join(ext.Dir, m.Exec[0])
+	// 在交给 os/exec 之前核对原路径，避免 Windows 按 PATHEXT 补猜后缀。
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("exec %s 须为文件", path)
+	}
+	log, err := openLog(logDir, m.ID)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(path, m.Exec[1:]...)
+	cmd.Dir = ext.Dir
+	p, err := startChild(cmd, log, handler, observe)
+	if err != nil {
+		return nil, fmt.Errorf("启动 %s: %w", m.ID, err)
+	}
+	return p, nil
+}
+
+func startChild(cmd *exec.Cmd, log *tailLog, handler Handler, observe func(bool, []byte)) (*child, error) {
 	// 父进程自己管理管道：后代可能继承 stderr，Wait 必须能先报告主进程退出。
 	var pipes [3]struct{ r, w *os.File }
 	for i := range pipes {
@@ -192,7 +221,7 @@ func startChild(cmd *exec.Cmd, log *tailLog, handler Handler) (*child, error) {
 		return nil, errors.Join(err, stdin.w.Close(), stdout.r.Close(), stderr.r.Close(), log.file.Close())
 	}
 	p := &child{
-		conn:     NewConn(stdout.r, stdin.w, handler, 0),
+		conn:     newConn(stdout.r, stdin.w, handler, 0, observe),
 		killTree: kill,
 		exited:   make(chan struct{}),
 		logDone:  make(chan error, 1),
