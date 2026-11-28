@@ -58,12 +58,12 @@ func doctorJSON(t *testing.T, home string, wantCode int) map[string]app.Check {
 func TestDoctor(t *testing.T) {
 	home := t.TempDir()
 	checks := doctorJSON(t, home, 0)
-	for _, name := range []string{"stateDir", "databaseOpen", "databaseInfo"} {
+	for _, name := range []string{"stateDir", "databaseOpen", "databaseInfo", "extensions"} {
 		if c := checks[name]; c.Status != "ok" || c.Detail == "" {
 			t.Errorf("%s 检查 = %+v", name, c)
 		}
 	}
-	for _, name := range []string{"host", "extensions"} {
+	for _, name := range []string{"host"} {
 		if c := checks[name]; c.Status != "skipped" || !strings.Contains(c.Detail, "未实现") {
 			t.Errorf("%s 检查 = %+v", name, c)
 		}
@@ -144,5 +144,20 @@ func TestHelpListsDoctor(t *testing.T) {
 	code, output := invoke(t, t.TempDir(), "--help")
 	if code != 0 || !strings.Contains(output, "craft doctor") {
 		t.Errorf("帮助退出码 = %d，输出 = %s", code, output)
+	}
+}
+
+func TestDoctorRejectedExtension(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "extensions", "broken")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := doctorJSON(t, home, 1)["extensions"]
+	if c.Status != "failed" || !strings.Contains(c.Detail, "broken") {
+		t.Fatal(c)
 	}
 }

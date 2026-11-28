@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
+	"github.com/chhuax/craft/internal/exthost"
 	"github.com/chhuax/craft/internal/store"
 )
 
@@ -23,7 +27,9 @@ func Doctor(ctx context.Context, getenv func(string) string, userHomeDir func() 
 	state := Check{"stateDir", "ok", dir}
 	open := Check{"databaseOpen", "skipped", "状态目录不可用"}
 	info := Check{"databaseInfo", "skipped", "数据库未打开"}
+	extensions := Check{"extensions", "skipped", "状态目录不可用"}
 	if err == nil {
+		extensions = checkExtensions(ExtensionDirs(dir, getenv("CRAFT_EXTENSIONS")))
 		err = probeStateDir(dir)
 		// 即使无法创建临时文件，也要独立检验现有库能否打开。
 		open, info = checkDatabase(ctx, filepath.Join(dir, "craft.db"))
@@ -34,7 +40,7 @@ func Doctor(ctx context.Context, getenv func(string) string, userHomeDir func() 
 	return []Check{
 		state, open, info,
 		{"host", "skipped", "尚未实现"},
-		{"extensions", "skipped", "尚未实现"},
+		extensions,
 	}
 }
 
@@ -76,4 +82,29 @@ func checkDatabase(ctx context.Context, path string) (open, info Check) {
 		info.Detail += "，需要 journal_mode=wal"
 	}
 	return open, info
+}
+
+// ExtensionDirs 合并默认目录与平台路径列表。首次离线查询允许默认目录尚未创建；
+// 显式配置的目录不存在仍须由 Discover 报告。
+func ExtensionDirs(home, extra string) []string {
+	dirs := filepath.SplitList(extra)
+	dir := filepath.Join(home, "extensions")
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		dirs = append([]string{dir}, dirs...)
+	}
+	return slices.DeleteFunc(dirs, func(p string) bool { return p == "" })
+}
+
+func checkExtensions(dirs []string) Check {
+	r := exthost.Discover(dirs...)
+	c := Check{"extensions", "ok", fmt.Sprintf("装载 %d，被拒绝 %d", len(r.Extensions), len(r.Rejected))}
+	var reasons []string
+	for _, p := range slices.Sorted(maps.Keys(r.Rejected)) {
+		reasons = append(reasons, r.Rejected[p].Error())
+	}
+	if len(reasons) > 0 {
+		c.Status = "failed"
+		c.Detail += "，" + strings.Join(reasons, "；")
+	}
+	return c
 }
