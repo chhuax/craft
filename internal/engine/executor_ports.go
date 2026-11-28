@@ -34,11 +34,22 @@ type Channel interface {
 // OutboundMessage 包含唯一消息标记和确定的回复地址，供运行层在事务提交后投递。
 type OutboundMessage struct {
 	ID      string      `json:"id"`
-	Kind    string      `json:"kind"`
+	Kind    ReplyKind   `json:"kind"`
 	WorkID  string      `json:"workId,omitempty"`
 	Channel *ChannelRef `json:"channel"`
 	Text    string      `json:"text"`
 }
+
+// ReplyKind 是外发消息的类型。v1 只有两种：对人来信的确认（acknowledgement）与
+// 答复、结果、提问（reply，经 reply effect 发往单一渠道）。旧引擎端口里还列过 notice，
+// 但引擎从未单独发出过它，所以 v1 不设这一类，避免凭空造一个没有规格依据的收件语义。
+type ReplyKind string
+
+// 外发消息的两种类型。
+const (
+	ReplyAcknowledgement ReplyKind = "acknowledgement"
+	ReplyReply           ReplyKind = "reply"
+)
 
 // ReplyStatus 记录外发消息的状态，confirm 等待人的确认。
 type ReplyStatus string

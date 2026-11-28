@@ -145,7 +145,7 @@ func commandRollback(t *testing.T, s engine.Store) {
 		}},
 		{"回答", func() error { _, err := e.Answer(ctx, w.ID, "继续"); return err }},
 		{"回复", func() error {
-			_, err := e.Reply(ctx, engine.ReplyRequest{Kind: "reply", WorkID: w.ID, TriggerID: "source", Text: "答复"})
+			_, err := e.Reply(ctx, engine.ReplyRequest{Kind: engine.ReplyReply, WorkID: w.ID, TriggerID: "source", Text: "答复"})
 			return err
 		}},
 	} {

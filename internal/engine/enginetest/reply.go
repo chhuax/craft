@@ -35,7 +35,10 @@ func replyCommands(t *testing.T, s engine.Store) {
 		must(t, u.PutTrigger(tr))
 		return u.PutWork(w)
 	}))
-	for _, tc := range []struct{ kind, id, work, attention, code string }{
+	for _, tc := range []struct {
+		kind                      engine.ReplyKind
+		id, work, attention, code string
+	}{
 		{"acknowledgement", "absent", w.ID, "", engine.CodeUnknownTrigger}, {"acknowledgement", "context", w.ID, "", engine.CodeNotReached}, {"acknowledgement", "source", "other", "", engine.CodeNotReached},
 		{"acknowledgement", "nochannel", w.ID, "", engine.CodeAckNoChannel}, {"acknowledgement", "robot", w.ID, "", engine.CodeAckNotPerson}, {"acknowledgement", "source", "absent", "", engine.CodeUnknownWork},
 		{"reply", "robot", w.ID, "", engine.CodeNotQuestion}, {"reply", "source", w.ID, "", engine.CodeNoAnswer}, {"reply", "", "other", "stale", engine.CodeNotAttention}, {"reply", "", w.ID, "", engine.CodeNotReady},
@@ -43,7 +46,7 @@ func replyCommands(t *testing.T, s engine.Store) {
 		_, err := e.Reply(ctx, engine.ReplyRequest{Kind: tc.kind, TriggerID: tc.id, WorkID: tc.work, AttentionID: tc.attention, Text: "回复"})
 		checkCode(t, err, tc.code)
 	}
-	req := engine.ReplyRequest{Kind: "acknowledgement", WorkID: w.ID, TriggerID: "source", Text: "收到"}
+	req := engine.ReplyRequest{Kind: engine.ReplyAcknowledgement, WorkID: w.ID, TriggerID: "source", Text: "收到"}
 	ack, err := e.Reply(ctx, req)
 	must(t, err)
 	if ack.Reused || ack.Status != engine.ReplyPending || ack.ID != engine.Key("ack", "source") {
@@ -62,7 +65,7 @@ func replyCommands(t *testing.T, s engine.Store) {
 		_, err := e.Report(ctx, w.ID, "a", engine.WorkerReport{State: engine.Progress, ReplyToTriggerID: id})
 		must(t, err)
 	}
-	req = engine.ReplyRequest{Kind: "reply", WorkID: w.ID, TriggerID: "nochannel", Text: "答复"}
+	req = engine.ReplyRequest{Kind: engine.ReplyReply, WorkID: w.ID, TriggerID: "nochannel", Text: "答复"}
 	_, err = e.Reply(ctx, req)
 	checkCode(t, err, engine.CodeNoChannel)
 	req.TriggerID = "source"
@@ -79,7 +82,7 @@ func replyCommands(t *testing.T, s engine.Store) {
 	w = readWork(t, s, w.ID)
 	w.Ended = &engine.WorkEnd{By: "human", Outcome: engine.Stopped}
 	saveWork(t, s, w)
-	_, err = e.Reply(ctx, engine.ReplyRequest{Kind: "acknowledgement", WorkID: w.ID, TriggerID: "source"})
+	_, err = e.Reply(ctx, engine.ReplyRequest{Kind: engine.ReplyAcknowledgement, WorkID: w.ID, TriggerID: "source"})
 	checkCode(t, err, engine.CodeAckEnded)
 }
 
@@ -90,7 +93,7 @@ func guardedReplies(t *testing.T, s engine.Store) {
 	q := engine.WorkerReport{State: engine.Progress, HumanAction: json.RawMessage(`"是否继续"`), Ask: "participants", QuestionForTriggerID: "source"}
 	asked, err := e.Report(ctx, w.ID, "a", q)
 	must(t, err)
-	req := engine.ReplyRequest{Kind: "reply", WorkID: w.ID, AttentionID: asked.Attention.ID, Text: "是否继续"}
+	req := engine.ReplyRequest{Kind: engine.ReplyReply, WorkID: w.ID, AttentionID: asked.Attention.ID, Text: "是否继续"}
 	first, err := e.Reply(ctx, req)
 	must(t, err)
 	next, err := e.Report(ctx, w.ID, "a", q)
@@ -115,7 +118,7 @@ func guardedReplies(t *testing.T, s engine.Store) {
 	result, err := e.Report(ctx, w.ID, "a", engine.WorkerReport{State: engine.Ready, Summary: "完成"})
 	must(t, err)
 	id := result.Assignments[0].Report.ID
-	req = engine.ReplyRequest{Kind: "reply", WorkID: w.ID, ReportID: id, Text: "完成"}
+	req = engine.ReplyRequest{Kind: engine.ReplyReply, WorkID: w.ID, ReportID: id, Text: "完成"}
 	out, err := e.Reply(ctx, req)
 	must(t, err)
 	if out.Status != engine.ReplyPending {
@@ -125,7 +128,7 @@ func guardedReplies(t *testing.T, s engine.Store) {
 	must(t, err)
 	_, err = e.Reply(ctx, req)
 	checkCode(t, err, engine.CodeNotReady)
-	ask := engine.ReplyRequest{Kind: "reply", TriggerID: "unassigned", Text: "答复"}
+	ask := engine.ReplyRequest{Kind: engine.ReplyReply, TriggerID: "unassigned", Text: "答复"}
 	tr := trigger("unassigned", "ask", item("new"))
 	tr.Channel = &engine.ChannelRef{Source: "feed", Thread: json.RawMessage(`"new"`)}
 	tr.Human = true

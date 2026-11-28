@@ -12,7 +12,7 @@
 | Evals | 攒批开研判、决策落地、重新研判 |
 | Works | 建/恢复/结束、input、唤醒、订阅增删、attach、handback |
 | Assignments | 开始、报告、中断、轮次结束、投递回执 |
-| Replies | 回复与通知（经 Channel 端口） |
+| Replies | 确认与答复（经 Channel 端口；类型只有 `acknowledgement` 与 `reply`，结果与提问都走 `reply`，v1 不设 `notice`） |
 
 - **每个公开命令 = 一个事务**。`evaluateDue` 例外：每个 Thread/Work 各自一个事务。
 - **事务内必须重读**聚合；事务外读到的对象只用来挑选要处理哪些。
@@ -235,7 +235,7 @@ revalidate(mandate):
 | `assessment` | evalId | 研判与选址 | 1 |
 | `launch` | assignmentId | Preparer 准备目标 → Executor 开/续会话 | 空闲槽位数 |
 | `delivery` | workId | 把 undelivered 按条依次追加给执行方 | 4 |
-| `reply` | messageId | 回复经 outbound 外发 | 由 Channel 决定 |
+| `reply` | messageId | 确认与答复经 outbound 发往单一渠道（`acknowledgement`、`reply` 两类） | 由 Channel 决定 |
 | `stop` | assignmentId | 结束会话轮次 | 不限 |
 
 ### 6.1 实现要点

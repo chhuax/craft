@@ -59,7 +59,7 @@ func BenchmarkAssignmentCommands(b *testing.B) {
 					return err
 				}},
 				{"Reply", initial, func() error {
-					_, err := e.Reply(ctx, ReplyRequest{Kind: "acknowledgement", WorkID: id, TriggerID: "origin", Text: "已收到"})
+					_, err := e.Reply(ctx, ReplyRequest{Kind: ReplyAcknowledgement, WorkID: id, TriggerID: "origin", Text: "已收到"})
 					return err
 				}},
 				{"Answer", initial, func() error { _, err := e.Answer(ctx, id, "继续"); return err }},

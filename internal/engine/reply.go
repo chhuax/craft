@@ -8,14 +8,14 @@ import (
 
 // ReplyRequest 标识要答复的人的事件、要外发的当前问题或就绪结果。会话调用携带当前绑定。
 type ReplyRequest struct {
-	Kind         string   `json:"kind"`
-	WorkID       string   `json:"workId,omitempty"`
-	TriggerID    string   `json:"triggerId,omitempty"`
-	AttentionID  string   `json:"attentionId,omitempty"`
-	ReportID     string   `json:"reportId,omitempty"`
-	Text         string   `json:"text"`
-	Session      *Session `json:"-"`
-	AssignmentID string   `json:"assignmentId,omitempty"`
+	Kind         ReplyKind `json:"kind"`
+	WorkID       string    `json:"workId,omitempty"`
+	TriggerID    string    `json:"triggerId,omitempty"`
+	AttentionID  string    `json:"attentionId,omitempty"`
+	ReportID     string    `json:"reportId,omitempty"`
+	Text         string    `json:"text"`
+	Session      *Session  `json:"-"`
+	AssignmentID string    `json:"assignmentId,omitempty"`
 }
 
 // ReplyReceipt 给出已入队消息的状态。Reused 表示已有同一消息，不会覆盖首次正文。
@@ -66,7 +66,7 @@ func (e *Engine) Reply(ctx context.Context, req ReplyRequest) (ReplyReceipt, err
 }
 
 func (req ReplyRequest) answersTrigger() bool {
-	return req.Kind == "reply" && req.AttentionID == "" && req.ReportID == "" && req.TriggerID != ""
+	return req.Kind == ReplyReply && req.AttentionID == "" && req.ReportID == "" && req.TriggerID != ""
 }
 
 func queueReply(u Unit, m OutboundMessage, w *Work, tr *Trigger, req ReplyRequest, now string) (ReplyReceipt, error) {
@@ -104,7 +104,7 @@ func queueReply(u Unit, m OutboundMessage, w *Work, tr *Trigger, req ReplyReques
 
 func replyWork(r Reader, req ReplyRequest) (*Work, error) {
 	id := req.WorkID
-	if id == "" && req.Kind == "acknowledgement" {
+	if id == "" && req.Kind == ReplyAcknowledgement {
 		return nil, &UserError{Code: CodeUnknownWork}
 	}
 	if id == "" && req.TriggerID != "" {
@@ -149,7 +149,7 @@ func (e *Engine) replyMessage(r Reader, w *Work, tr *Trigger, req ReplyRequest) 
 	}
 	var address *ChannelRef
 	switch {
-	case req.Kind == "acknowledgement":
+	case req.Kind == ReplyAcknowledgement:
 		if w.Ended != nil {
 			return m, &UserError{Code: CodeAckEnded}
 		}
@@ -186,7 +186,7 @@ func (e *Engine) replyMessage(r Reader, w *Work, tr *Trigger, req ReplyRequest) 
 		}
 		address = tr.Channel
 		m.ID = Key("reply", tr.ID, req.Text)
-	case req.Kind == "reply":
+	case req.Kind == ReplyReply:
 		var err error
 		m.ID, address, err = e.workMessage(r, w, req)
 		if err != nil {
