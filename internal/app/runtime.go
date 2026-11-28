@@ -59,23 +59,27 @@ func NewRuntime(db *store.SQLite, clock alarm.Clock, scope engine.SourceScope, e
 	r := &Runtime{repo: &engineStore{db: db}, clock: clock, effects: effects, stopAlarms: stopAlarms, wake: make(chan struct{}, 1)}
 	// 首次生效时 PolicyChanged 尚无旧快照；引擎依赖始终可读。
 	r.policy.Store(&engine.Policy{})
-	cfg := engine.Config{
-		Store: r.repo, Scope: scope,
-		Clock:  func() string { return clock.Now().UTC().Format("2006-01-02T15:04:05.000Z") },
-		Policy: func() engine.Policy { return *r.policy.Load() },
-	}
 	var err error
-	r.pass, err = engine.New(cfg)
+	r.pass, err = r.newEngine(r.repo, scope)
 	if err != nil {
 		return nil, err
 	}
 	// Pass 内部的 EvaluateDue 即使暂停也可能提交空事务；只有外部命令需要借提交再次唤醒。
-	cfg.Store = commandStore{r.repo, r.Request}
-	r.Commands, err = engine.New(cfg)
+	r.Commands, err = r.newEngine(commandStore{r.repo, r.Request}, scope)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
+}
+
+const utcMillis = "2006-01-02T15:04:05.000Z"
+
+func (r *Runtime) newEngine(repo engine.Store, scope engine.SourceScope) (*engine.Engine, error) {
+	return engine.New(engine.Config{
+		Store: repo, Scope: scope,
+		Clock:  func() string { return r.clock.Now().UTC().Format(utcMillis) },
+		Policy: func() engine.Policy { return *r.policy.Load() },
+	})
 }
 
 // Request 合并多个唤醒请求；只有 Pass 循环可以消费它们。
@@ -129,11 +133,8 @@ func (r *Runtime) Stop(ctx context.Context) error {
 		r.stopAlarms = nil
 	}
 	if r.done != nil {
-		r.cancel()
-		select {
-		case <-r.done:
-		case <-ctx.Done():
-			return fmt.Errorf("等待 Pass 结束: %w", ctx.Err())
+		if err := r.stopPass(ctx); err != nil {
+			return err
 		}
 		if err := r.effects.Stop(ctx); err != nil {
 			return fmt.Errorf("停止 effect: %w", err)
@@ -145,4 +146,19 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	}
 	r.closed = true
 	return nil
+}
+
+// daemon 还要在关库前回收扩展。拆出这一步，让两种入口遵循同一条 Pass 停止边界。
+// 调用方串行管理生命周期，done 在循环退出前不可替换。
+func (r *Runtime) stopPass(ctx context.Context) error {
+	if r.done == nil {
+		return nil
+	}
+	r.cancel()
+	select {
+	case <-r.done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("等待 Pass 结束: %w", ctx.Err())
+	}
 }
