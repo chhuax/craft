@@ -36,9 +36,9 @@ func TestHotAllocations(t *testing.T) {
 		run  func()
 	}{
 		{"Gate", func() { sinkGate = p.Gate(hotTrigger, hotThread, hotWorks) }},
-		{"Admits", func() { sinkString = p.Admits(hotEval, hotEval.Basis.Rules) }},
+		{"Admits", func() { sinkString = string(p.Admits(hotEval, hotEval.Basis.Rules)) }},
 		{"Revalidate", func() { sinkValid = p.Revalidate(Mandate{Strength: Inferred, Basis: hotEval.Basis}) }},
-		{"ModeOf", func() { sinkString = p.ModeOf("gh", "update") }},
+		{"ModeOf", func() { sinkString = string(p.ModeOf("gh", "update")) }},
 		{"WorkStage", func() { sinkStage = WorkStage(hotWork) }}, {"ThreadKey", func() { sinkString = ThreadKey(hotRef) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,7 +61,7 @@ func BenchmarkAdmits(b *testing.B) {
 	p := hotPolicy(b)
 	b.ReportAllocs()
 	for b.Loop() {
-		sinkString = p.Admits(hotEval, hotEval.Basis.Rules)
+		sinkString = string(p.Admits(hotEval, hotEval.Basis.Rules))
 	}
 }
 
@@ -78,7 +78,7 @@ func BenchmarkModeOf(b *testing.B) {
 	p := hotPolicy(b)
 	b.ReportAllocs()
 	for b.Loop() {
-		sinkString = p.ModeOf("gh", "update")
+		sinkString = string(p.ModeOf("gh", "update"))
 	}
 }
 

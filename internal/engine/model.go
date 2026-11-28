@@ -116,11 +116,11 @@ type Mandate struct {
 
 // MandateBasis 记录准入路径与当时依赖的事件、发送人和规则。
 type MandateBasis struct {
-	Via    string   `json:"via"`
+	Via    Via      `json:"via"`
 	Source string   `json:"source"`
 	Event  string   `json:"event"`
 	Sender string   `json:"sender,omitempty"`
-	Mode   string   `json:"mode,omitempty"`
+	Mode   Mode     `json:"mode,omitempty"`
 	Rules  []string `json:"rules,omitempty"`
 }
 
@@ -162,4 +162,36 @@ const (
 	Reopen      DecisionKind = "reopen"
 	Stop        DecisionKind = "stop"
 	Unavailable DecisionKind = "unavailable"
+)
+
+// Mode 是人对一类事件设定的处理方式；取值与 02 §4.1 的 settings 一致。
+type Mode string
+
+// 事件的处理方式：off 完全不接，observe 只记录「本会接」，auto 直接接活。
+const (
+	ModeOff     Mode = "off"
+	ModeObserve Mode = "observe"
+	ModeAuto    Mode = "auto"
+)
+
+// Via 记录授权是怎样产生的，用于事后审计与恢复前的重新校验。
+type Via string
+
+// 授权来源，见 01 §5 的 MandateBasis。
+const (
+	ViaAddressed     Via = "addressed"
+	ViaFollowup      Via = "followup"
+	ViaEvent         Via = "event"
+	ViaPersonRequest Via = "personRequest"
+	ViaHumanDirect   Via = "humanDirect"
+)
+
+// Admission 是 Policy.Admits 的结论：ok 建单、observe 只记录、refuse 拒绝。
+type Admission string
+
+// Admits 的三种结论。
+const (
+	AdmitOK      Admission = "ok"
+	AdmitObserve Admission = "observe"
+	AdmitRefuse  Admission = "refuse"
 )

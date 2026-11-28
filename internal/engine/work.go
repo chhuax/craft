@@ -76,15 +76,15 @@ type DeliveryFailure struct {
 
 // Assignment 记录一次派工与这次派工的最近进展。
 type Assignment struct {
-	ID          string  `json:"id"`
-	State       string  `json:"state"`
-	CreatedAt   string  `json:"createdAt"`
-	StartedAt   string  `json:"startedAt,omitempty"`
-	EndedAt     string  `json:"endedAt,omitempty"`
-	EndedReason string  `json:"endedReason,omitempty"`
-	Report      *Report `json:"report,omitempty"`
-	DeliveredAt string  `json:"deliveredAt,omitempty"`
-	IdleAt      string  `json:"idleAt,omitempty"`
+	ID          string          `json:"id"`
+	State       AssignmentState `json:"state"`
+	CreatedAt   string          `json:"createdAt"`
+	StartedAt   string          `json:"startedAt,omitempty"`
+	EndedAt     string          `json:"endedAt,omitempty"`
+	EndedReason string          `json:"endedReason,omitempty"`
+	Report      *Report         `json:"report,omitempty"`
+	DeliveredAt string          `json:"deliveredAt,omitempty"`
+	IdleAt      string          `json:"idleAt,omitempty"`
 }
 
 // Report 保留执行方在本次派工中报告的状态与摘要。
@@ -145,4 +145,14 @@ const (
 	Blocked       ReportState = "blocked"
 	Failed        ReportState = "failed"
 	ReportDropped ReportState = "dropped"
+)
+
+// AssignmentState 是派工自身的生命周期，与执行方报告的进度（ReportState）分开。
+type AssignmentState string
+
+// 派工的三个状态，见 01 §6。
+const (
+	AssignmentPending AssignmentState = "pending"
+	AssignmentRunning AssignmentState = "running"
+	AssignmentEnded   AssignmentState = "ended"
 )

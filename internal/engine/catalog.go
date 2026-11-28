@@ -12,7 +12,7 @@ type EventDef struct {
 	Source       string     `json:"source"`
 	Event        string     `json:"event"`
 	Label        string     `json:"label,omitempty"`
-	Default      string     `json:"default"`
+	Default      Mode       `json:"default"`
 	Strength     Strength   `json:"strength"`
 	FollowupOnly bool       `json:"followupOnly,omitempty,omitzero"`
 	Rule         *EventRule `json:"rule,omitempty"`
@@ -46,7 +46,7 @@ type Settings struct {
 
 // EventOverride 仅允许调整扩展事件的运行模式。
 type EventOverride struct {
-	Mode string `json:"mode"`
+	Mode Mode `json:"mode"`
 }
 
 // Rule 保存研判可命中的接活规则及其执行说明。
@@ -60,16 +60,16 @@ type Rule struct {
 type eventID struct{ source, event string }
 type activeEvent struct {
 	definition EventDef
-	mode       string
+	mode       Mode
 }
 
-func validMode(mode string) bool { return mode == "off" || mode == "observe" || mode == "auto" }
+func validMode(mode Mode) bool { return mode == ModeOff || mode == ModeObserve || mode == ModeAuto }
 
 func builtinEvents() []EventDef {
 	return []EventDef{
-		{Source: "craft", Event: "person.answer", Default: "auto", Strength: Explicit, FollowupOnly: true},
-		{Source: "craft", Event: "person.request", Default: "auto", Strength: Explicit},
-		{Source: "craft", Event: "person.direct", Default: "auto", Strength: Explicit},
+		{Source: "craft", Event: "person.answer", Default: ModeAuto, Strength: Explicit, FollowupOnly: true},
+		{Source: "craft", Event: "person.request", Default: ModeAuto, Strength: Explicit},
+		{Source: "craft", Event: "person.direct", Default: ModeAuto, Strength: Explicit},
 	}
 }
 
@@ -88,11 +88,11 @@ func (d EventDef) snapshot() EventDef {
 
 var ruleIDChars = strings.NewReplacer(":", "__", ".", "_")
 
-func buildCatalog(defs []EventDef, overrides map[string]EventOverride) (map[eventID]*activeEvent, map[string]string, []Rule, error) {
+func buildCatalog(defs []EventDef, overrides map[string]EventOverride) (map[eventID]*activeEvent, map[string]Mode, []Rule, error) {
 	builtins := builtinEvents()
 	entries := append(builtins, defs...)
 	events := make(map[eventID]*activeEvent, len(entries))
-	modes := make(map[string]string, len(entries))
+	modes := make(map[string]Mode, len(entries))
 	defaults := make(map[string]Rule)
 	for i, d := range entries {
 		key := d.Source + ":" + d.Event
@@ -103,7 +103,7 @@ func buildCatalog(defs []EventDef, overrides map[string]EventOverride) (map[even
 			return nil, nil, nil, fmt.Errorf("事件键重复 %q", key)
 		}
 		if d.Default == "" {
-			d.Default = "observe"
+			d.Default = ModeObserve
 		}
 		if d.Strength == "" {
 			d.Strength = Inferred

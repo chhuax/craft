@@ -17,7 +17,7 @@ func PolicyEffects(openWorks []Work, old, next Policy) map[string]PolicyEffect {
 				actor := m.Actor
 				effect.RequesterAllowed = &no
 				effect.Requester = &actor
-			case m.Strength == Inferred && mode != "auto":
+			case m.Strength == Inferred && mode != ModeAuto:
 				effect.Proactive = &no
 			}
 		}

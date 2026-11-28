@@ -12,7 +12,7 @@ func TestPolicyEffects(t *testing.T) {
 	disabled.Enabled = false
 	edited := rule
 	edited.Instruction = "新"
-	makePolicy := func(mode string, allowed bool, r *Rule) Policy {
+	makePolicy := func(mode Mode, allowed bool, r *Rule) Policy {
 		s := Settings{}
 		if allowed {
 			s.AllowedSenders = []ActorRef{actor}
@@ -33,7 +33,7 @@ func TestPolicyEffects(t *testing.T) {
 		name     string
 		old, new Policy
 		strength Strength
-		via      string
+		via      Via
 		want     PolicyEffect
 	}{
 		{"未变化", old, old, Inferred, "event", PolicyEffect{}},

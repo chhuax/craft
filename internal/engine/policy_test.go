@@ -21,10 +21,12 @@ func TestGate(t *testing.T) {
 		name                        string
 		strength                    Strength
 		follow, human               bool
-		addressed, mode             string
+		addressed                   string
+		mode                        Mode
 		allowed, sub, work, context bool
 		want                        Strength
-		via, reason                 string
+		via                         Via
+		reason                      string
 	}{
 		{name: "未知事件", human: true, addressed: "direct", mode: "auto", allowed: true, sub: true, reason: "unknownEvent"},
 		{name: "人定向优先", strength: Explicit, follow: true, human: true, addressed: "mention", mode: "observe", sub: true, want: Explicit, via: "addressed"},
@@ -103,11 +105,11 @@ func TestBuiltins(t *testing.T) {
 
 func TestAdmits(t *testing.T) {
 	for _, tc := range []struct {
-		mode     string
+		mode     Mode
 		strength Strength
-		via      string
+		via      Via
 		rules    []string
-		want     string
+		want     Admission
 	}{
 		{"", Explicit, "event", nil, "refuse"}, {"off", Explicit, "followup", nil, "refuse"},
 		{"observe", Explicit, "followup", nil, "ok"}, {"observe", Explicit, "addressed", nil, "observe"},
@@ -130,12 +132,13 @@ func TestAdmits(t *testing.T) {
 func TestRevalidate(t *testing.T) {
 	actor := ActorRef{Source: "chat", ID: "u"}
 	for _, tc := range []struct {
-		mode        string
-		strength    Strength
-		via, sender string
-		allowed     bool
-		rules       []string
-		want        bool
+		mode     Mode
+		strength Strength
+		via      Via
+		sender   string
+		allowed  bool
+		rules    []string
+		want     bool
 	}{
 		{"", Explicit, "humanDirect", "", true, nil, false}, {"off", Explicit, "personRequest", "", true, nil, false},
 		{"auto", Explicit, "followup", "u", false, nil, false}, {"observe", Explicit, "addressed", "u", false, nil, true},

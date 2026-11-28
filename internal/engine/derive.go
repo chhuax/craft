@@ -32,10 +32,10 @@ func WorkStage(w Work) Stage {
 			}
 		}
 	}
-	if a.State == "pending" {
+	if a.State == AssignmentPending {
 		return Stage{"working", "queued"}
 	}
-	if a.State == "ended" || (a.Report != nil && a.Report.State == Waiting) {
+	if a.State == AssignmentEnded || (a.Report != nil && a.Report.State == Waiting) {
 		return Stage{Stage: "idle"}
 	}
 	return Stage{Stage: "working"}

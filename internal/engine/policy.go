@@ -51,16 +51,16 @@ func NewPolicy(s Settings, defs []EventDef) (Policy, error) {
 	}, nil
 }
 
-func policyVersion(senders []ActorRef, modes map[string]string, rules []Rule) (string, error) {
+func policyVersion(senders []ActorRef, modes map[string]Mode, rules []Rule) (string, error) {
 	sorted := slices.Clone(senders)
 	slices.SortFunc(sorted, func(a, b ActorRef) int {
 		return cmp.Or(cmp.Compare(a.Source, b.Source), cmp.Compare(a.ID, b.ID), cmp.Compare(a.Name, b.Name))
 	})
 	// 单独投影版本输入；运行参数和事件的展示字段不参与研判重排。
 	payload := struct {
-		AllowedSenders []ActorRef        `json:"allowedSenders"`
-		Events         map[string]string `json:"events"`
-		Rules          []Rule            `json:"rules"`
+		AllowedSenders []ActorRef      `json:"allowedSenders"`
+		Events         map[string]Mode `json:"events"`
+		Rules          []Rule          `json:"rules"`
 	}{sorted, modes, rules}
 	raw, err := jsonv2.Marshal(&payload)
 	if err != nil {
@@ -95,7 +95,7 @@ func (p Policy) Event(source, event string) (EventDef, bool) {
 }
 
 // ModeOf 读取合并后的模式，空串表示事件未登记。
-func (p Policy) ModeOf(source, event string) string {
+func (p Policy) ModeOf(source, event string) Mode {
 	if e := p.events[eventID{source, event}]; e != nil {
 		return e.mode
 	}
@@ -117,7 +117,7 @@ func (p Policy) Gate(t Trigger, th Thread, works []Work) GateResult {
 		return GateResult{Reason: ReasonUnknownEvent}
 	}
 	d := &e.definition
-	if e.mode == "off" {
+	if e.mode == ModeOff {
 		if d.FollowupOnly {
 			return GateResult{Reason: ReasonFollowupOnly}
 		}
@@ -128,19 +128,19 @@ func (p Policy) Gate(t Trigger, th Thread, works []Work) GateResult {
 	strength := Inferred
 	switch {
 	case t.Human && t.Addressed != "" && d.Strength == Explicit:
-		basis.Via = "addressed"
+		basis.Via = ViaAddressed
 		strength = Explicit
 	case !t.Human && d.Strength == Explicit && !d.FollowupOnly:
-		basis.Via = "event"
+		basis.Via = ViaEvent
 		strength = Explicit
 	case (t.Addressed != "direct" || allowed) && participating(&th, works):
-		basis.Via = "followup"
+		basis.Via = ViaFollowup
 		basis.Mode = ""
 		if t.Human && allowed {
 			strength = Explicit
 		}
 	case !d.FollowupOnly:
-		basis.Via = "event"
+		basis.Via = ViaEvent
 	default:
 		return GateResult{Reason: ReasonFollowupOnly}
 	}
@@ -160,24 +160,24 @@ func participating(th *Thread, works []Work) bool {
 }
 
 // Admits 在 accept 落地前读取当前模式和生效规则，返回 ok、observe 或 refuse。
-func (p Policy) Admits(e Evaluation, rules []string) string {
+func (p Policy) Admits(e Evaluation, rules []string) Admission {
 	mode := p.ModeOf(e.Basis.Source, e.Basis.Event)
-	if mode == "" || mode == "off" {
-		return "refuse"
+	if mode == "" || mode == ModeOff {
+		return AdmitRefuse
 	}
 	if e.Strength == Explicit {
-		if e.Basis.Via == "followup" || mode == "auto" {
-			return "ok"
+		if e.Basis.Via == ViaFollowup || mode == ModeAuto {
+			return AdmitOK
 		}
-		return "observe"
+		return AdmitObserve
 	}
-	if mode == "observe" {
-		return "observe"
+	if mode == ModeObserve {
+		return AdmitObserve
 	}
 	if len(rules) != 0 && p.rulesEnabled(rules) {
-		return "ok"
+		return AdmitOK
 	}
-	return "refuse"
+	return AdmitRefuse
 }
 
 func (p Policy) rulesEnabled(ids []string) bool {
@@ -190,7 +190,7 @@ func (p Policy) rulesEnabled(ids []string) bool {
 }
 
 func (p Policy) senderValid(m *Mandate) bool {
-	if m.Basis.Sender == "" || m.Basis.Via == "addressed" {
+	if m.Basis.Sender == "" || m.Basis.Via == ViaAddressed {
 		return true
 	}
 	_, ok := p.senders[actorID{m.Actor.Source, m.Actor.ID}]
@@ -200,8 +200,8 @@ func (p Policy) senderValid(m *Mandate) bool {
 // Revalidate 在恢复或追加到已结束工作前，核对原授权所依赖的条件是否仍成立。
 func (p Policy) Revalidate(m Mandate) bool {
 	mode := p.ModeOf(m.Basis.Source, m.Basis.Event)
-	if mode == "" || mode == "off" || !p.senderValid(&m) {
+	if mode == "" || mode == ModeOff || !p.senderValid(&m) {
 		return false
 	}
-	return m.Strength == Explicit || (mode == "auto" && p.rulesEnabled(m.Basis.Rules))
+	return m.Strength == Explicit || (mode == ModeAuto && p.rulesEnabled(m.Basis.Rules))
 }
