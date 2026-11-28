@@ -3,16 +3,16 @@ on:
   push:
     tags: ['v*']
 
-permissions:
-  contents: write
-
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -24,3 +24,58 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 构建并归档通用包
+        shell: bash
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          package="$RUNNER_TEMP/plugin"
+          archive="craft-plugin-$version"
+          go run ./tools/package --version "$version" --out "$package"
+          cd "$package"
+          zip -qr "$RUNNER_TEMP/$archive.zip" .
+          cd "$RUNNER_TEMP"
+          tar -czf "$archive.tar.gz" -C "$package" .
+          sha256sum "$archive.zip" "$archive.tar.gz" > "$archive-checksums.txt"
+      - name: 上传通用包和 SHA-256 校验和
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd "$RUNNER_TEMP"
+          archive="craft-plugin-${GITHUB_REF_NAME#v}"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            "$archive.zip" "$archive.tar.gz" "$archive-checksums.txt"
+      - name: 同步分发仓库
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PLUGIN_REPO_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "未配置 PLUGIN_REPO_TOKEN，跳过分发仓库同步。"
+            exit 0
+          fi
+
+          url=https://github.com/chhuax/craft-plugin.git
+          git -c credential.helper='!gh auth git-credential' clone "$url" "$RUNNER_TEMP/distribution"
+          cd "$RUNNER_TEMP/distribution"
+          rsync -a --delete --exclude='/.git' "$RUNNER_TEMP/plugin/" ./
+          # 两个宿主都可读取这个索引，固定 tag 可确保它们安装同一版包。
+          jq -n --arg url "$url" --arg tag "$GITHUB_REF_NAME" '{
+            name: "craft-plugin", owner: {name: "chhuax"},
+            plugins: [{name: "craft", source: {source: "url", url: $url, ref: $tag}}]
+          }' > .claude-plugin/marketplace.json
+          git add --all --force .
+
+          tag_ref="refs/tags/$GITHUB_REF_NAME"
+          existing_tag=$(git tag --list "$GITHUB_REF_NAME")
+          if [[ -n "$existing_tag" ]]; then
+            # 重跑时核对已发布的树（含文件模式），防止同版本指向不同内容。
+            git diff --cached --exit-code --stat "$tag_ref" --
+            echo "分发仓库已有相同内容的 $GITHUB_REF_NAME。"
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit --allow-empty -m "release: 发布 $GITHUB_REF_NAME"
+          branch=$(git symbolic-ref --short HEAD)
+          git -c credential.helper='!gh auth git-credential' push --atomic origin \
+            "HEAD:refs/heads/$branch" "HEAD:$tag_ref"
