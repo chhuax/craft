@@ -100,6 +100,17 @@ Executor ───── 开会话 → assignmentStarted → 执行方干活 →
 
 `threadClosed(ref, outcome, at, detail?)`：先记对象本身的关闭事实（按「最后状态事实时间」比较，旧结果忽略），再对每个 open Work 标记 Follow 关闭；满足 `followsDone` 且未被 `unfinished` 拖住则结束 Work。`threadReopened` 对称，清 `closed` 并记 `reopenedAt`（即使此前没有关闭记录也记，使之后迟到的旧关闭被忽略）。
 
+**`followsDone(work)`**：
+- 没有 Follow：只有执行方最后一份 `ready` 报告能证明完成，结果为 `completed`；
+- 有 `own=true` 的 Follow：所有 own 对象都已关闭才算完成，结果取最后一次关闭事实；
+- 只有 `own=false` 的 Follow 等同于没有 own 对象，不额外等待。旧引擎在这种情形里还区分「过去是否拥有过可关闭对象」，v1 **不保留**这项历史事实，以免给模型加只为一个边角情形服务的字段。
+
+**`unfinished(work, closedAt)`**（拖住结束，满足任一条即不结束）：
+1. 有 `human` 的 trigger input 已送达而会话还没取走（`readAt` 为 `null`），且不是纯 context 副本——此时结束会让人的这条消息悄悄丢失；这条与派工的先后无关；
+2. 最后一个 Assignment 创建于外部关闭事实之后（它可能在处理更新的要求），并且它没有 `ready` 报告、或还有 `undelivered` 输入、或报告之后又来了新的 input（`policy-changed` 不算）。
+
+人手动停止、`stopWork` 等强制结束不看 `unfinished`；强制结束时 `undelivered` 一并清空。
+
 ## 4. Policy
 
 带版本的纯规则对象，引擎在命令里调用，不做 IO。

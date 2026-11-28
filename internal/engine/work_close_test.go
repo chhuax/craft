@@ -70,3 +70,29 @@ func TestUnfinishedAfterClose(t *testing.T) {
 		})
 	}
 }
+
+// 人的消息已送达但会话还没取走（readAt 为 null）时，Work 不能自然结束；
+// 已读、旧输入缺少读取记录、纯 context 副本、非人的消息都不拦。
+func TestUnfinishedHoldsForUnreadHumanInput(t *testing.T) {
+	const closedAt = "2026-01-01T00:00:00.000Z"
+	unread := ReadTime{Present: true}
+	read := ReadTime{Present: true, Time: "2026-01-01T00:00:01.000Z"}
+	for _, tc := range []struct {
+		name  string
+		input WorkInput
+		want  bool
+	}{
+		{"人的消息已送达未读", WorkInput{Kind: "trigger", Human: true, ReadAt: unread}, true},
+		{"人的消息已读", WorkInput{Kind: "trigger", Human: true, ReadAt: read}, false},
+		{"旧版本输入没有读取记录", WorkInput{Kind: "trigger", Human: true}, false},
+		{"纯上下文副本未读", WorkInput{Kind: "trigger", Human: true, Context: true, ReadAt: unread}, false},
+		{"非人的消息未读", WorkInput{Kind: "trigger", ReadAt: unread}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := Work{Inputs: []WorkInput{tc.input}}
+			if got := unfinished(&w, closedAt); got != tc.want {
+				t.Errorf("拖住结束 %v，期望 %v", got, tc.want)
+			}
+		})
+	}
+}

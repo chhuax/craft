@@ -37,6 +37,13 @@ func sameClose(a, b *ThreadClose) bool {
 
 // 在外部关闭事实之后才启动的派工可能仍在处理更新的要求，不能用旧关闭抢先结束。
 func unfinished(w *Work, closedAt string) bool {
+	// 人的消息已送达、会话还没取走（readAt 为 null）时结束，这条消息就悄悄丢了。
+	// 这一条与派工的先后无关，所以放在派工判断之前。纯 context 跟随的副本不要求被读。
+	if slices.ContainsFunc(w.Inputs, func(in WorkInput) bool {
+		return in.Kind == "trigger" && in.Human && !in.Context && in.ReadAt == (ReadTime{Present: true})
+	}) {
+		return true
+	}
 	if len(w.Assignments) == 0 {
 		return false
 	}
