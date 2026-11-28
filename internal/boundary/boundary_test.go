@@ -15,8 +15,9 @@ import (
 	"testing"
 )
 
-// 契约套件供适配器复用，只有导入 engine 才能取得端口类型。
+// 扩展宿主共享公开协议，适配器契约套件共享引擎端口；例外均精确到包。
 var standardImportExceptions = map[[2]string]bool{
+	{"internal/exthost", "github.com/chhuax/craft/pkg/protocol"}:              true,
 	{"internal/engine/enginetest", "github.com/chhuax/craft/internal/engine"}: true,
 	{"internal/engine/repotest", "github.com/chhuax/craft/internal/engine"}:   true,
 }
@@ -28,7 +29,7 @@ func allowedImport(dir, pkg string) bool {
 func TestStandardLibraryOnly(t *testing.T) {
 	root := os.DirFS(filepath.Join("..", ".."))
 	imports := make(map[string][]string)
-	for _, dir := range []string{"internal/alarm", "internal/engine", "internal/method"} {
+	for _, dir := range []string{"internal/alarm", "internal/engine", "internal/exthost", "internal/method"} {
 		err := fs.WalkDir(root, dir, func(name string, entry fs.DirEntry, err error) error {
 			if err != nil || entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 				return err
@@ -204,6 +205,14 @@ func TestStandardImportException(t *testing.T) {
 		{"internal/engine/repotest/extra", "github.com/chhuax/craft/internal/engine", false},
 		{"internal/method", "github.com/chhuax/craft/internal/engine", false},
 		{"internal/alarm", "github.com/chhuax/craft/internal/engine", false},
+		{"internal/exthost", "github.com/chhuax/craft/pkg/protocol", true},
+		{"internal/exthost", "github.com/chhuax/craft/pkg/protocol/extra", false},
+		{"internal/exthost", "github.com/chhuax/craft/internal/engine", false},
+		{"internal/exthost", "github.com/chhuax/craft/internal/store", false},
+		{"internal/exthost", "github.com/chhuax/craft/internal/alarm", false},
+		{"internal/exthost", "github.com/chhuax/craft/internal/app", false},
+		{"internal/exthost", "example.org/helper", false},
+		{"internal/engine", "github.com/chhuax/craft/pkg/protocol", false},
 	} {
 		if got := allowedImport(tc.dir, tc.pkg); got != tc.want {
 			t.Errorf("%s 导入 %q 放行 = %t", tc.dir, tc.pkg, got)
