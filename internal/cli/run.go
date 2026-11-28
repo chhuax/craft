@@ -77,6 +77,9 @@ func commands() []commandSpec {
 		{"outbox withdraw", "<id>", "", person, outboundCommand},
 		{"alarm list", "", "", reader, daemonRPC},
 		{"alarm run", "<ext> <alarm>", "[--wait [SEC]]", person, alarmRun},
+		{"cred list", "", "", person, credentialList},
+		{"cred login", "<provider>", "[--name N]", person, credentialChange},
+		{"cred logout", "<provider>", "[--name N]", person, credentialChange},
 		{"ext enable", "<id>", "", settings, daemonRPC},
 		{"ext disable", "<id>", "", settings, daemonRPC},
 		{"ext test", "<path>", "[--fixtures DIR]", person, extTest},
@@ -123,6 +126,8 @@ func helpResult(*invocation) (result, error) {
 		switch c.path {
 		case "version":
 			b.WriteString("    显示构建版本")
+		case "cred login":
+			b.WriteString("    从标准输入读取一行密钥")
 		case "doctor":
 			b.WriteString("    运行安装自检")
 		case "--help":
@@ -185,6 +190,9 @@ func (i *invocation) parse(args []string) error {
 		o, ok := known[name]
 		_, seen := i.flags[name]
 		if !ok || seen {
+			if strings.HasPrefix(i.spec.path, "cred ") {
+				return invalid("未知或重复的凭据参数")
+			}
 			return invalid("未知或重复的选项 %q", name)
 		}
 		if o.value {
