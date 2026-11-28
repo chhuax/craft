@@ -3,70 +3,294 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/chhuax/craft/internal/app"
+	"github.com/chhuax/craft/internal/engine"
 )
 
-const usage = `用法
-  craft version [--json]    显示构建版本
-  craft doctor [--json]     运行安装自检
-  craft --help [--json]     显示帮助`
+type role int
 
-// Run 返回进程退出码，使宿主和终端能按同一契约区分参数错误与输出错误。
+const (
+	local role = iota
+	reader
+	person
+	worker
+	settings
+)
+
+type commandSpec struct {
+	path, positional, options string
+	role                      role
+	handle                    func(*invocation) (result, error)
+}
+
+type result struct {
+	payload  any
+	evidence []any
+}
+
+// CommandContext 是进程入口提供的可信上下文。扩展目录由安装方指定，普通参数不能声明身份或对象能力。
+type CommandContext struct {
+	Session       *app.SessionBinding
+	ExtensionDirs []string
+}
+
+type invocation struct {
+	extensionDirs []string
+	ctx           context.Context
+	spec          commandSpec
+	args          []string
+	flags         map[string]string
+	home          string
+	binding       *app.SessionBinding
+	clock         engine.Clock
+	version       string
+	getenv        func(string) string
+	userHomeDir   func() (string, error)
+}
+
+func commands() []commandSpec {
+	return []commandSpec{
+		{"version", "", "", local, versionResult},
+		{"doctor", "", "", local, doctorResult},
+		{"--help", "", "", local, helpResult},
+		{"watch status", "", "", reader, status},
+		{"watch attention", "", "[--cursor C]", reader, attention},
+		{"watch list", "", "[--open] [--thread K] [--cursor C]", reader, listWorks},
+		{"watch read", "<work>", "[--offset N]", worker, readWork},
+		{"watch events", "", "[--since REV]", reader, events},
+		{"watch decisions", "", "[--kind K] [--source S] [--would-accept] [--limit N] [--cursor C]", reader, decisions},
+		{"watch request", "<thread-ref>", "[--text T]", person, request},
+		{"watch stop", "<work>", "", person, stop},
+		{"watch retry", "<work>", "", person, retry},
+		{"watch answer", "<work>", "--text T", person, answer},
+		{"watch reevaluate", "<trigger>", "", person, reevaluate},
+		{"watch attach", "<work> <trigger>", "", person, attach},
+		{"watch unsubscribe", "<thread-key>", "", person, unsubscribe},
+		{"watch dismiss", "<decision>", "", person, dismiss},
+		{"watch report", "<state>", "--summary T [--question Q]", worker, report},
+		{"watch handback", "<trigger>", "--reason T", worker, handback},
+		{"watch note", "", "--text T", worker, note},
+		{"watch follow-context", "<thread-ref>", "", worker, followContext},
+		{"watch mark-unrelated", "<thread-key>", "", worker, markUnrelated},
+		{"policy show", "", "", reader, showPolicy},
+		{"policy set", "<settings-json>", "", settings, setPolicy},
+	}
+}
+
+func helpResult(*invocation) (result, error) {
+	var b strings.Builder
+	b.WriteString("用法")
+	for _, c := range commands() {
+		fmt.Fprintf(&b, "\n  craft %s", c.path)
+		if c.positional != "" {
+			fmt.Fprintf(&b, " %s", c.positional)
+		}
+		if c.options != "" {
+			fmt.Fprintf(&b, " %s", c.options)
+		}
+		b.WriteString(" [--json]")
+		switch c.path {
+		case "version":
+			b.WriteString("    显示构建版本")
+		case "doctor":
+			b.WriteString("    运行安装自检")
+		case "--help":
+			b.WriteString("    显示帮助")
+		case "policy set":
+			b.WriteString("    按 JSON 中给出的字段更新设置")
+		case "watch note":
+			b.WriteString("    当前引擎尚无写备注命令")
+		}
+	}
+	return data(map[string]string{"help": b.String()})
+}
+func versionResult(i *invocation) (result, error) {
+	return data(map[string]string{"version": i.version})
+}
+func doctorResult(i *invocation) (result, error) {
+	return data(app.Doctor(i.ctx, i.getenv, i.userHomeDir))
+}
+func data(v any) (result, error) { return result{payload: v}, nil }
+
+var errArguments = errors.New("参数错误")
+var errDenied = errors.New("角色被拒绝")
+var errDependency = errors.New("依赖不可用")
+
+func invalid(format string, values ...any) error {
+	return fmt.Errorf("%w: %s", errArguments, fmt.Sprintf(format, values...))
+}
+
+// 选项清单同时用于帮助和解析，方括号标记可选项，大写占位符标记取值选项。
+func (i *invocation) parse(args []string) error {
+	type option struct{ required, value bool }
+	known := map[string]option{}
+	words := strings.Fields(i.spec.options)
+	for n := 0; n < len(words); n++ {
+		word := words[n]
+		o := option{required: !strings.HasPrefix(word, "[")}
+		name := strings.Trim(word, "[]")
+		if n+1 < len(words) && !strings.Contains(words[n+1], "--") {
+			o.value = true
+			n++
+		}
+		known[name] = o
+	}
+	i.flags = map[string]string{}
+	for n := 0; n < len(args); n++ {
+		token := args[n]
+		if !strings.HasPrefix(token, "-") {
+			if token == "" {
+				return invalid("位置参数不能为空")
+			}
+			i.args = append(i.args, token)
+			continue
+		}
+		name, v, inline := strings.Cut(token, "=")
+		o, ok := known[name]
+		_, seen := i.flags[name]
+		if !ok || seen {
+			return invalid("未知或重复的选项 %q", name)
+		}
+		if o.value {
+			if !inline {
+				if n+1 == len(args) || strings.HasPrefix(args[n+1], "--") {
+					return invalid("%s 缺少值", name)
+				}
+				n++
+				v = args[n]
+			}
+			if strings.TrimSpace(v) == "" {
+				return invalid("%s 的值为空", name)
+			}
+		} else if inline {
+			return invalid("%s 不接受值", name)
+		}
+		i.flags[name] = v
+	}
+	if len(i.args) != len(strings.Fields(i.spec.positional)) {
+		return invalid("用法 craft %s %s %s", i.spec.path, i.spec.positional, i.spec.options)
+	}
+	for name, o := range known {
+		if _, ok := i.flags[name]; o.required && !ok {
+			return invalid("需要 %s", name)
+		}
+	}
+	return nil
+}
+
+func findCommand(args []string) (commandSpec, []string, error) {
+	for _, c := range commands() {
+		path := strings.Fields(c.path)
+		if len(args) >= len(path) && slices.Equal(args[:len(path)], path) {
+			return c, args[len(path):], nil
+		}
+	}
+	return commandSpec{}, nil, invalid("请运行 craft --help 查看用法")
+}
+
+// Run 返回进程退出码，使宿主和终端能区分参数错误、拒绝与存储故障。
 func Run(args []string, version string, stdout, stderr io.Writer) int {
 	return run(args, version, stdout, stderr, os.Getenv, os.UserHomeDir)
 }
 
 func run(args []string, version string, stdout, stderr io.Writer, getenv func(string) string, userHomeDir func() (string, error)) int {
+	return runBound(args, version, stdout, stderr, getenv, userHomeDir, CommandContext{}, nowUTC)
+}
+
+// RunWithContext 接受宿主已经核实的会话和安装上下文，不从工作标识或角色名推导权限。
+func RunWithContext(args []string, version string, stdout, stderr io.Writer, trusted CommandContext) int {
+	return runBound(args, version, stdout, stderr, os.Getenv, os.UserHomeDir, trusted, nowUTC)
+}
+
+func nowUTC() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
+
+func runBound(args []string, version string, stdout, stderr io.Writer, getenv func(string) string, userHomeDir func() (string, error), trusted CommandContext, clock engine.Clock) int {
+	binding := trusted.Session
 	asJSON := slices.Contains(args, "--json")
 	if asJSON {
 		args = slices.DeleteFunc(slices.Clone(args), func(s string) bool { return s == "--json" })
 	}
-
-	var key, value string
-	switch {
-	case len(args) == 1 && args[0] == "version":
-		key, value = "version", version
-	case len(args) == 1 && args[0] == "--help":
-		key, value = "help", usage
-	case len(args) == 1 && args[0] == "doctor":
-		return reportChecks(stdout, asJSON, app.Doctor(context.Background(), getenv, userHomeDir))
-	default:
-		message := "参数错误，请运行 craft --help 查看用法"
-		if asJSON {
-			err := json.NewEncoder(stderr).Encode(map[string]any{
-				"ok":    false,
-				"error": map[string]any{"code": "invalidArguments", "message": message, "detail": map[string]any{}},
-			})
-			if err != nil {
-				return 1
-			}
-		} else if _, err := fmt.Fprintln(stderr, message); err != nil {
-			return 1
-		}
-		return 2
+	spec, tail, err := findCommand(args)
+	i := invocation{ctx: context.Background(), spec: spec, binding: binding, extensionDirs: trusted.ExtensionDirs, clock: clock, version: version, getenv: getenv, userHomeDir: userHomeDir}
+	if err == nil {
+		err = i.parse(tail)
 	}
-
-	var err error
-	if asJSON {
-		err = writeEnvelope(stdout, true, map[string]string{key: value})
-	} else {
-		_, err = fmt.Fprintln(stdout, value)
+	if err == nil && spec.role != local {
+		switch {
+		case spec.role == worker && (binding == nil || binding.Session.Host == "" || binding.Session.ID == "" || binding.Assignment == ""):
+			err = fmt.Errorf("%w: 需要宿主提供当前 worker 会话及派工绑定", errDenied)
+		case spec.role != worker && binding != nil:
+			err = fmt.Errorf("%w: 执行方只能操作自己的 Work", errDenied)
+		default:
+			i.home, err = app.StateHome(getenv, userHomeDir)
+		}
 	}
 	if err != nil {
-		return 1
+		return failure(stderr, asJSON, err)
+	}
+
+	res, err := spec.handle(&i)
+	if err != nil {
+		return failure(stderr, asJSON, err)
+	}
+	if checks, ok := res.payload.([]app.Check); ok {
+		return reportChecks(stdout, asJSON, checks)
+	}
+	if err := render(stdout, res, asJSON); err != nil {
+		return failure(stderr, asJSON, err)
 	}
 	return 0
 }
 
+func failure(w io.Writer, asJSON bool, err error) int {
+	code, exit := "internalError", 1
+	detail := map[string]string{}
+	if e, ok := errors.AsType[*engine.UserError](err); ok {
+		code, exit = "refused", 5
+		if engine.IsMissing(err) {
+			code = "missing"
+		}
+		for key, value := range e.Values {
+			detail[key] = clipText(value)
+		}
+		detail["code"] = e.Code
+	} else {
+		switch {
+		case errors.Is(err, errArguments), errors.Is(err, app.ErrInvalidSettings):
+			code, exit = "invalidArguments", 2
+		case errors.Is(err, errDenied), errors.Is(err, app.ErrOtherWork):
+			code, exit = "denied", 4
+		case errors.Is(err, errDependency), errors.Is(err, app.ErrObjectKinds):
+			code, exit = "unavailable", 6
+		}
+	}
+	if asJSON {
+		err = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]any{"code": code, "message": clipText(err.Error()), "detail": detail}})
+	} else {
+		_, err = fmt.Fprintln(w, clipText(err.Error()))
+	}
+	if err != nil {
+		return 1
+	}
+	return exit
+}
 func reportChecks(stdout io.Writer, asJSON bool, checks []app.Check) int {
 	ok := !slices.ContainsFunc(checks, func(c app.Check) bool { return c.Status == "failed" })
 	if asJSON {
-		if err := writeEnvelope(stdout, ok, map[string][]app.Check{"checks": checks}); err != nil {
+		envelope := map[string]any{"ok": ok, "payload": map[string][]app.Check{"checks": checks}, "evidence": []string{}}
+		// 失败时也保留逐项报告，兼容已经消费 doctor 检查项的调用方。
+		if !ok {
+			envelope["error"] = map[string]any{"code": "checkFailed", "message": "安装自检未通过", "detail": map[string]string{}}
+		}
+		if err := json.NewEncoder(stdout).Encode(envelope); err != nil {
 			return 1
 		}
 	} else {
@@ -81,10 +305,4 @@ func reportChecks(stdout io.Writer, asJSON bool, checks []app.Check) int {
 		return 1
 	}
 	return 0
-}
-
-func writeEnvelope(w io.Writer, ok bool, payload any) error {
-	return json.NewEncoder(w).Encode(map[string]any{
-		"ok": ok, "payload": payload, "evidence": []string{},
-	})
 }
