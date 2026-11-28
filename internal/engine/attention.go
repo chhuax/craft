@@ -99,13 +99,15 @@ func workAttention(w *Work) (AttentionItem, bool) {
 
 const attentionChars = 600
 
-func clip(s string) string {
-	if len(s) <= attentionChars {
+func clip(s string) string { return clipChars(s, attentionChars) }
+
+func clipChars(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
 	n := 0
 	for i := range s {
-		if n == attentionChars {
+		if n == limit {
 			return s[:i]
 		}
 		n++

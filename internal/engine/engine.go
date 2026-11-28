@@ -14,7 +14,7 @@ type Config struct {
 // Engine 在各自的写事务内执行命令；实例只持有依赖，可以跨命令复用。
 type Engine struct{ cfg Config }
 
-// New 组装引擎。Store、Clock、Policy 必填，使用 Receive 时还须提供 Scope。
+// New 组装引擎。Store、Clock、Policy 必填，Receive、接单和挂接还须提供 Scope。
 func New(cfg Config) (*Engine, error) {
 	if cfg.Store == nil || cfg.Clock == nil || cfg.Policy == nil {
 		return nil, errors.New("引擎需要 Store、Clock 与策略快照提供者")

@@ -66,7 +66,7 @@ func (e *Engine) receive(u Unit, tr Trigger, policy Policy) (ReceiveResult, erro
 		}
 		return Filtered, emitReceived(u, tr.ID, keys, now)
 	}
-	return routeTrigger(u, tr, keys, policy, now)
+	return routeTrigger(u, tr, keys, policy, e.cfg.Scope, now)
 }
 
 func triggerThreadKeys(refs []ThreadRef) []string {
@@ -82,7 +82,7 @@ func triggerThreadKeys(refs []ThreadRef) []string {
 	return keys
 }
 
-func routeTrigger(u Unit, tr Trigger, keys []string, p Policy, now string) (ReceiveResult, error) {
+func routeTrigger(u Unit, tr Trigger, keys []string, p Policy, scope SourceScope, now string) (ReceiveResult, error) {
 	threads, err := u.GetThreads(keys...)
 	if err != nil {
 		return "", err
@@ -99,7 +99,7 @@ func routeTrigger(u Unit, tr Trigger, keys []string, p Policy, now string) (Rece
 		return "", err
 	}
 	d := TriggerDisposition{At: now}
-	works, skipped, err := fanoutTrigger(u, tr, keys, threads, p, &d)
+	works, skipped, err := fanoutTrigger(u, tr, keys, threads, p, scope, &d)
 	if err != nil {
 		return "", err
 	}
