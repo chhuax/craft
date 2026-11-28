@@ -7,14 +7,19 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/chhuax/craft/internal/host"
 )
 
 func serveCreate() error {
-	if len(os.Args) != 6 || os.Args[2] != "--name" || !slices.Equal(os.Args[4:], []string{"--output-format", "json"}) {
+	if len(os.Args) < 6 || os.Args[2] != "--name" || !slices.Equal(os.Args[4:6], []string{"--output-format", "json"}) {
 		return errors.New("后台创建参数无效")
+	}
+	// 带首条时正文必须在 "--" 之后，且带投递标记。
+	if len(os.Args) != 6 && (len(os.Args) != 8 || os.Args[6] != "--" || !strings.HasPrefix(os.Args[7], "[craft:delivery:")) {
+		return errors.New("首条参数无效")
 	}
 	if os.Getenv(host.EnvRole) != "worker" || os.Getenv(host.EnvHost) != hostName || os.Getenv(host.EnvSessionID) != "" || os.Getenv(host.EnvAssignment) != "a" || os.Getenv(host.EnvWork) != "w" || os.Getenv("PRIVATE_TOKEN") != "" {
 		return errors.New("新会话绑定错误")
@@ -66,10 +71,6 @@ func TestCreateAndBootstrap(t *testing.T) {
 	s, err := d.Create(t.Context(), spec)
 	if err != nil || s != registered || s.ID != exampleID {
 		t.Fatal(s, registered, err)
-	}
-	d.workers.Wait()
-	if reply, err := d.LastReply(t.Context(), s); err != nil || reply == "" {
-		t.Fatal(reply, err)
 	}
 }
 

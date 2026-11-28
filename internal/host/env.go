@@ -72,8 +72,10 @@ func siteEnvironment() ([]string, error) {
 	return config.Names, nil
 }
 
+// USER、LOGNAME、USERNAME 必须保留：Claude Code 在 macOS 上按当前用户名读钥匙串里的登录凭据，
+// 缺了就报 "Not logged in"（实测，2.1.x）。它们只是账户名，不含凭据。
 var baseEnvironment = []string{
-	"PATH", "HOME", "USERPROFILE", "SystemRoot", "LOCALAPPDATA", "APPDATA", "TMPDIR", "TEMP", "TMP", "LANG", "CRAFT_HOME",
+	"PATH", "HOME", "USER", "LOGNAME", "USERNAME", "USERPROFILE", "SystemRoot", "LOCALAPPDATA", "APPDATA", "TMPDIR", "TEMP", "TMP", "LANG", "CRAFT_HOME",
 	"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
 	"SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE",
 }
