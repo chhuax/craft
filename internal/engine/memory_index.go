@@ -20,6 +20,7 @@ type indexNode struct {
 type writeMark byte
 
 type memoryRow struct {
+	retention   *retentionIndex
 	inputs      *memoryInputs
 	origin      string   // 在办工作的不可变起源事件，用于刷新按起源对象的反查
 	subscribers []string // Thread 的反查索引键，避免更新索引时再次解码聚合
@@ -146,4 +147,24 @@ func (n *indexNode) walkReverse(yield func(*memoryRow) bool) bool {
 		}
 	}
 	return n.row == nil || yield(n.row)
+}
+
+// 按 [lo, hi) 遍历，空上界表示读到末尾。整段在范围外的分叉不访问其子树。
+func (n *indexNode) between(lo, hi string) iter.Seq2[string, *memoryRow] {
+	return func(yield func(string, *memoryRow) bool) { n.walkRange(lo, hi, yield) }
+}
+
+func (n *indexNode) walkRange(lo, hi string, yield func(string, *memoryRow) bool) bool {
+	if n == nil || (hi != "" && n.prefix >= hi) || (n.prefix < lo && !strings.HasPrefix(lo, n.prefix)) {
+		return true
+	}
+	if n.row != nil && n.prefix >= lo && !yield(n.prefix, n.row) {
+		return false
+	}
+	for _, child := range n.children {
+		if !child.walkRange(lo, hi, yield) {
+			return false
+		}
+	}
+	return true
 }

@@ -16,6 +16,8 @@ func Run(t *testing.T, factory func(t *testing.T) engine.Store) {
 		name  string
 		check func(*testing.T, engine.Store)
 	}{
+		{"Prune引用与边界", pruneRetention}, {"Prune事件", pruneEvents},
+		{"Prune关联对象", pruneThreadReferences}, {"Prune改写引用", pruneUpdatedReferences},
 		{"外发问题与结果的代次", guardedReplies},
 		{"回执与未读边界", assignmentEdges},
 		{"批量发送重放", deliveryReplay},
