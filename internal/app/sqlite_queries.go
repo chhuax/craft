@@ -7,8 +7,8 @@ import (
 	"github.com/chhuax/craft/internal/engine"
 )
 
-func (r engineReader) keys(name, key string) ([]string, error) {
-	rows, err := r.read.Lookup(name, key)
+func (r engineReader) keys(name string, args ...any) ([]string, error) {
+	rows, err := r.read.Lookup(name, args...)
 	if err != nil {
 		return nil, err
 	}
