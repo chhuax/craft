@@ -16,7 +16,7 @@ func (r SQLiteReader) Get(collection, key string) (json.RawMessage, bool, error)
 		return nil, false, err
 	}
 	var value []byte
-	err = r.tx.QueryRowContext(r.ctx, "SELECT value FROM "+table+" WHERE key = ?", key).Scan(&value)
+	err = r.tx.QueryRowContext(r.ctx, getQuery(table), key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -24,6 +24,10 @@ func (r SQLiteReader) Get(collection, key string) (json.RawMessage, bool, error)
 		return nil, false, fmt.Errorf("读取 %s[%q]: %w", table, key, err)
 	}
 	return value, true, nil
+}
+
+func getQuery(table string) string {
+	return "SELECT value FROM " + table + " WHERE key = ?"
 }
 
 // List 按集合注册的谓词读取当前快照，返回的字节归调用方所有。

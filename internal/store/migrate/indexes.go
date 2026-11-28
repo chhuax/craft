@@ -14,6 +14,18 @@ func createIndexes(tx *sql.Tx) error {
 		"CREATE INDEX work_recent ON watch_work(ended,created DESC,ordinal DESC) WHERE ended IS NULL",
 		"CREATE INDEX work_origin ON watch_work(origin_thread,ordinal DESC) WHERE ended IS NULL",
 		"CREATE INDEX work_origin_id ON watch_work(origin_id) WHERE origin_id IS NOT NULL",
+		`CREATE TABLE watch_work_input (
+			work_key TEXT REFERENCES watch_work(key) ON DELETE CASCADE, input_id TEXT NOT NULL, position INTEGER NOT NULL,
+			PRIMARY KEY(work_key,input_id)) WITHOUT ROWID`,
+		// 整份替换与批量导入都走 INSERT ... ON CONFLICT，先为新布局建索引。
+		// 回执只更新原位置的投递字段，走 UPDATE 时可以沿用这份位置索引。
+		`CREATE TRIGGER work_input_positions BEFORE INSERT ON watch_work BEGIN
+			DELETE FROM watch_work_input WHERE work_key=NEW.key;
+			INSERT INTO watch_work_input(work_key,input_id,position)
+				SELECT NEW.key,coalesce(item.value->>'$.id',''),item.key FROM json_each(NEW.value,'$.inputs') item
+				WHERE item.type='object'
+				ON CONFLICT(work_key,input_id) DO UPDATE SET position=max(position,excluded.position);
+		END`,
 		"CREATE INDEX event_rev ON watch_event(json_extract(value,'$.rev'))",
 		"CREATE INDEX decision_thread ON watch_decision(thread_key,key)",
 		"CREATE INDEX link_trigger ON watch_trigger_thread(trigger_id,thread_key)",

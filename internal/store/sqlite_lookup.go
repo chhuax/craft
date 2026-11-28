@@ -25,6 +25,44 @@ var lookups = map[string]string{
 	"accepted": `SELECT ids.value,(SELECT json_array(decision_id,work_id)
 		FROM watch_acceptance WHERE trigger_id=ids.value ORDER BY decision_id DESC LIMIT 1) FROM json_each(?) AS ids`,
 	"events": `SELECT key,value FROM watch_event WHERE json_extract(value,'$.rev')>? ORDER BY json_extract(value,'$.rev') LIMIT ?`,
+	"deliveryWindow": `SELECT key,json_object(
+		'Ended',iif(json_type(w.value,'$.ended')='object',json('true'),json('false')),
+		'Assignment',w.value->'$.assignments[#-1]', 'Failure',w.value->'$.delivery',
+		'Batch',w.value->'$.deliveryBatch', 'UpdatedAt',w.value->>'$.updatedAt')
+		FROM watch_work w WHERE key=?`,
+	"deliveryHead": `SELECT q.value,NULL FROM watch_work w,json_each(w.value,'$.undelivered') q WHERE w.key=? LIMIT ?`,
+	"deliveryInputs": `SELECT p.input_id,w.value->('$.inputs['||p.position||']')
+		FROM watch_work w JOIN watch_work_input p ON p.work_key=w.key
+		WHERE w.key=? AND p.input_id IN (SELECT value FROM json_each(?))`,
+}
+
+// 这些投影只改原位置的值，保留文档中未选中的字段和数组元素的身份。
+var updates = map[string]string{
+	"deliveryInput": `UPDATE watch_work AS w SET value=json_set(w.value,'$.inputs['||p.position||']',
+		jsonb_patch(CASE WHEN ?1->'$.readAt' IS NULL
+			THEN jsonb_remove(w.value->('$.inputs['||p.position||']'),'$.readAt')
+			ELSE jsonb_set(w.value->('$.inputs['||p.position||']'),'$.readAt',?1->'$.readAt') END,
+			json_object('deliveredAt',?1->>'$.deliveredAt','deliveredTo',?1->>'$.deliveredTo')))
+		FROM watch_work_input p WHERE w.key=?2 AND p.work_key=w.key AND p.input_id=json_extract(?1,'$.id')`,
+	"consumeHead": `UPDATE watch_work SET value=json_set(value,'$.undelivered',
+		json((SELECT json_group_array(value) FROM json_each(watch_work.value,'$.undelivered') WHERE key>=?)))
+		WHERE key=?`,
+	"deliveryState": `UPDATE watch_work SET value=json_patch(jsonb_set(value,'$.assignments[#-1]',
+		jsonb_patch(value->'$.assignments[#-1]',json_object('deliveredAt',nullif(?1->>'$.deliveredAt','')))),
+		json_object('updatedAt',?1->>'$.updatedAt','delivery',?1->'$.delivery','deliveryBatch',?1->'$.deliveryBatch'))
+		WHERE key=?2`,
+}
+
+// Update 只允许按已登记的键和路径更新，以免部分写入破坏文档的二级索引。
+func (t *SQLiteTx) Update(name string, args ...any) error {
+	query, ok := updates[name]
+	if !ok {
+		return fmt.Errorf("未注册的索引更新 %q", name)
+	}
+	if _, err := t.tx.ExecContext(t.ctx, query, args...); err != nil {
+		return fmt.Errorf("更新 %s: %w", name, err)
+	}
+	return nil
 }
 
 // Lookup 按注册的查询名返回有序文档或键投影。参数只作为值绑定。

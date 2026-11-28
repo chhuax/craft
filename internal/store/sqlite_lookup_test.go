@@ -8,33 +8,45 @@ import (
 
 func TestLookupPlans(t *testing.T) {
 	s := openTestDB(t, filepath.Join(t.TempDir(), "plans.db"))
-	// 直接解释生产查询，允许遍历调用方传入的 JSON 键数组。
+	// 直接解释生产查询，允许展开请求的键数组或按主键命中的单份文档。
 	// 聚合和反查表必须按索引搜索，排序也应由索引满足。
-	expected := map[string]string{
-		"pending": "thread_pending", "evaluating": "thread_eval", "eval": "thread_eval",
-		"open": "watch_work_active", "recent": "work_recent", "origin": "work_origin",
-		"subscriptions": "subscription_work", "threadKeys": "link_trigger", "triggerIDs": "link_thread",
-		"decisions": "decision_thread", "accepted": "acceptance_trigger", "events": "event_rev",
+	const workKey = "INDEX sqlite_autoindex_watch_work_1 (key=?)"
+	const inputKey = "PRIMARY KEY (work_key=? AND input_id=?)"
+	expected := map[string][]string{
+		"pending": {"INDEX thread_pending"}, "evaluating": {"INDEX thread_eval"}, "eval": {"INDEX thread_eval"},
+		"open": {"INDEX watch_work_active"}, "recent": {"INDEX work_recent"}, "origin": {"INDEX work_origin"},
+		"subscriptions": {"INDEX subscription_work"}, "threadKeys": {"INDEX link_trigger"}, "triggerIDs": {"INDEX link_thread"},
+		"decisions": {"INDEX decision_thread"}, "accepted": {"INDEX acceptance_trigger"}, "events": {"INDEX event_rev"},
+		"deliveryWindow": {workKey}, "deliveryHead": {workKey}, "deliveryInputs": {workKey, inputKey},
+		"deliveryState": {workKey}, "consumeHead": {workKey}, "deliveryInput": {workKey, inputKey},
 	}
 	for name, query := range lookups {
-		t.Run(name, func(t *testing.T) { checkPlan(t, s, query, expected[name]) })
+		t.Run(name, func(t *testing.T) { checkPlan(t, s, query, expected[name]...) })
+	}
+	for name, query := range updates {
+		t.Run(name, func(t *testing.T) { checkPlan(t, s, query, expected[name]...) })
 	}
 	for _, collection := range []string{"watch_trigger", "watch_disposition", "watch_thread", "watch_work", "watch_decision"} {
-		t.Run(collection, func(t *testing.T) { checkPlan(t, s, manyQuery(collection), "sqlite_autoindex_"+collection) })
+		t.Run(collection, func(t *testing.T) { checkPlan(t, s, manyQuery(collection), "INDEX sqlite_autoindex_"+collection) })
 	}
-	checkPlan(t, s, effectHead, "effect_order")
-	checkPlan(t, s, effectDue, "effect_due")
+	checkPlan(t, s, getQuery("watch_reply_status"), "INDEX sqlite_autoindex_watch_reply_status_1 (key=?)")
+	checkPlan(t, s, effectByKey, "INDEX sqlite_autoindex_watch_effect_1 (kind=? AND key=?)")
+	checkPlan(t, s, effectHead, "INDEX effect_order")
+	checkPlan(t, s, effectDue, "INDEX effect_due")
 }
 
-func checkPlan(t *testing.T, s *SQLite, query, index string) {
+func checkPlan(t *testing.T, s *SQLite, query string, indexes ...string) {
 	t.Helper()
+	if len(indexes) == 0 {
+		t.Fatal("缺少预期索引")
+	}
 	rows, err := s.reader.Query("EXPLAIN QUERY PLAN "+query, make([]any, strings.Count(query, "?"))...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeTest(t, rows)
 	var steps []string
-	found := false
+	found := make(map[string]bool)
 	for rows.Next() {
 		var id, parent, unused int
 		var detail string
@@ -42,8 +54,10 @@ func checkPlan(t *testing.T, s *SQLite, query, index string) {
 			t.Fatal(err)
 		}
 		steps = append(steps, detail)
-		if strings.HasPrefix(detail, "SEARCH ") && index != "" && strings.Contains(detail, "INDEX "+index) {
-			found = true
+		for _, index := range indexes {
+			if strings.HasPrefix(detail, "SEARCH ") && strings.Contains(detail, index) {
+				found[index] = true
+			}
 		}
 		if strings.HasPrefix(detail, "SCAN ") && !strings.Contains(detail, "VIRTUAL TABLE") || strings.Contains(detail, "TEMP B-TREE FOR ORDER BY") {
 			t.Errorf("出现全表扫描或额外排序：%s", detail)
@@ -52,7 +66,9 @@ func checkPlan(t *testing.T, s *SQLite, query, index string) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if !found {
-		t.Errorf("未按 %s 查找：%v", index, steps)
+	for _, index := range indexes {
+		if !found[index] {
+			t.Errorf("未按 %s 查找：%v", index, steps)
+		}
 	}
 }

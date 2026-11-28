@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
@@ -56,7 +57,21 @@ func (t *SQLiteTx) Enqueue(kind, key string, value json.RawMessage) error {
 const effectColumns = "SELECT kind,key,value,seq,generation,attempts,coalesce(error,''),due,since FROM watch_effect "
 const effectHead = effectColumns + "WHERE kind=? ORDER BY seq LIMIT 1"
 const effectDue = effectColumns + "WHERE kind=? AND due<=? ORDER BY due,seq LIMIT ?"
+const effectByKey = "SELECT 1 FROM watch_effect WHERE kind=? AND key=?"
 const milliseconds = "2006-01-02T15:04:05.000Z"
+
+// HasEffect 按队列主键判断请求是否仍在队，退避中的请求也算在内。
+func (r SQLiteReader) HasEffect(kind, key string) (bool, error) {
+	var found bool
+	err := r.tx.QueryRowContext(r.ctx, effectByKey, kind, key).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("查询 effect %s[%q]: %w", kind, key, err)
+	}
+	return found, nil
+}
 
 // HeadEffect 读取该类队首，即使它正在退避也不能越过它。
 func (r SQLiteReader) HeadEffect(kind string) (*Effect, error) {

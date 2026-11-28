@@ -100,6 +100,8 @@ func TestSchemaV1(t *testing.T) {
 	for table, want := range map[string][]string{
 		"watch_thread":         {"ordinal", "key", "value", "ready", "eval_id", "closed"},
 		"watch_work":           {"ordinal", "key", "value", "created", "origin_id", "origin_thread", "ended"},
+		"watch_work_input":     {"work_key", "input_id", "position"},
+		"watch_reply_status":   {"key", "value"},
 		"watch_subscription":   {"thread_key", "work_id"},
 		"watch_acceptance":     {"decision_id", "trigger_id", "work_id"},
 		"watch_trigger":        {"key", "value", "primary_thread"},

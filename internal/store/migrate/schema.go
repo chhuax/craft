@@ -45,6 +45,7 @@ var collections = []CollectionSpec{
 	{Name: "watch_trigger_thread", Table: "watch_trigger_thread", columns: `,
       trigger_id TEXT AS (json_extract(value,'$[0]')), thread_key TEXT AS (json_extract(value,'$[1]'))`},
 	{Name: "watch_event", Table: "watch_event"},
+	{Name: "watch_reply_status", Table: "watch_reply_status"},
 	{Name: "watch_kv", Table: "watch_kv"},
 }
 
