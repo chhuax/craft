@@ -17,7 +17,8 @@ import (
 
 // 契约套件供适配器复用，只有导入 engine 才能取得端口类型。
 var standardImportExceptions = map[[2]string]bool{
-	{"internal/engine/repotest", "github.com/chhuax/craft/internal/engine"}: true,
+	{"internal/engine/enginetest", "github.com/chhuax/craft/internal/engine"}: true,
+	{"internal/engine/repotest", "github.com/chhuax/craft/internal/engine"}:   true,
 }
 
 func allowedImport(dir, pkg string) bool {
@@ -194,6 +195,9 @@ func TestStandardImportException(t *testing.T) {
 		dir, pkg string
 		want     bool
 	}{
+		{"internal/engine/enginetest", "github.com/chhuax/craft/internal/engine", true},
+		{"internal/engine/enginetest", "github.com/chhuax/craft/internal/store", false},
+		{"internal/engine/enginetest/extra", "github.com/chhuax/craft/internal/engine", false},
 		{"internal/engine/repotest", "github.com/chhuax/craft/internal/engine", true},
 		{"internal/engine/repotest", "github.com/chhuax/craft/internal/store", false},
 		{"internal/engine/repotest", "example.org/helper", false},
