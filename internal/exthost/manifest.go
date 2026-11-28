@@ -26,10 +26,18 @@ type Manifest struct {
 		Concurrency *int `json:"concurrency"`
 	} `json:"alarm_limits"`
 	WatchSources   []WatchSource   `json:"watch_sources"`
-	Actions        json.RawMessage `json:"actions"`
+	Actions        []ActionDecl    `json:"actions"`
 	Ports          json.RawMessage `json:"ports"`
 	PlacementRules json.RawMessage `json:"placement_rules"`
 	Views          json.RawMessage `json:"views"`
+}
+
+// ActionDecl 用全局标识声明动作归属和确认要求。
+type ActionDecl struct {
+	ID         string `json:"id"`
+	Level      string `json:"level"`
+	Reversible bool   `json:"reversible"`
+	ReadOnly   bool   `json:"read_only"`
 }
 
 // AlarmDecl 的时长已在装载时解析，应用层可直接登记。
@@ -239,6 +247,18 @@ func (m *Manifest) validate() error {
 			return fmt.Errorf("alarms.id 重复 %q", a.ID)
 		}
 		alarms[a.ID] = true
+	}
+	actions := make(map[string]bool)
+	for _, a := range m.Actions {
+		if a.ID == "" || actions[a.ID] {
+			return fmt.Errorf("actions.id 为空或重复 %q", a.ID)
+		}
+		switch a.Level {
+		case "auto", "confirm", "confirm_named", "deny":
+		default:
+			return fmt.Errorf("actions[%q].level 无效 %q", a.ID, a.Level)
+		}
+		actions[a.ID] = true
 	}
 	events := make(map[string]bool)
 	for i := range m.WatchSources {

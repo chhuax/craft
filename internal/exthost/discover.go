@@ -29,8 +29,12 @@ func Discover(dirs ...string) Result {
 	all := r.scan(dirs)
 	ids := map[string][]string{}
 	sources := map[string][]string{}
+	actions := map[string][]string{}
 	for _, e := range all {
 		ids[e.Manifest.ID] = append(ids[e.Manifest.ID], e.ManifestPath)
+		for _, a := range e.Manifest.Actions {
+			actions[a.ID] = append(actions[a.ID], e.ManifestPath)
+		}
 		// 权限按扩展归属。同一文件内重复列出来源不构成跨扩展争用。
 		seen := map[string]bool{}
 		for _, src := range e.Manifest.WatchSources {
@@ -57,9 +61,10 @@ func Discover(dirs ...string) Result {
 			}
 		}
 	}
+	r.rejectConflicts("actions.id", actions)
 	r.rejectConflicts("watch_sources.events", events)
 	r.rejectConflicts("watch_sources.id", sources)
-	// 已拓扑排序，只需向后传播一次来源或事件冲突导致的拒绝。
+	// 已拓扑排序，只需向后传播一次声明冲突导致的拒绝。
 	for _, e := range ordered {
 		for _, id := range e.Manifest.Requires {
 			if r.Rejected[candidates[id].ManifestPath] != nil {

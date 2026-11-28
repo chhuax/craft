@@ -41,7 +41,7 @@ func TestManifest(t *testing.T) {
    }],
    "facts":["due"]
  }],
- "actions":[{"n":9007199254740993}],"ports":{},"placement_rules":[],"views":[],"future":{"n":1}`
+ "actions":[{"id":"object:get","level":"auto","reversible":true,"read_only":true}],"ports":{"n":9007199254740993},"placement_rules":[],"views":[],"future":{"n":1}`
 	for _, tc := range []struct{ mode, strength, unmatched, tier string }{{"observe", "explicit", "record", "notice"}, {"off", "inferred", "filter", "digest"}, {"auto", "explicit", "record", "digest"}} {
 		replace := strings.NewReplacer("observe", tc.mode, "explicit", tc.strength, "record", tc.unmatched, "notice", tc.tier)
 		p := putManifest(t, t.TempDir(), "demo", manifestText("demo", replace.Replace(extra)))
@@ -65,7 +65,7 @@ func TestManifest(t *testing.T) {
 		if !reflect.DeepEqual(m.WatchSources, []WatchSource{source}) {
 			t.Fatal(m.WatchSources)
 		}
-		if string(m.Actions) != `[{"n":9007199254740993}]` || string(m.Ports) != "{}" || string(m.PlacementRules) != "[]" || string(m.Views) != "[]" {
+		if !slices.Equal(m.Actions, []ActionDecl{{ID: "object:get", Level: "auto", Reversible: true, ReadOnly: true}}) || string(m.Ports) != `{"n":9007199254740993}` || string(m.PlacementRules) != "[]" || string(m.Views) != "[]" {
 			t.Fatal(m)
 		}
 	}
@@ -328,5 +328,32 @@ func TestDiscoverRejectsCollidingThreadKeys(t *testing.T) {
 		if result.Rejected[p] == nil {
 			t.Fatalf("没有拒绝 %s", p)
 		}
+	}
+}
+
+func TestDiscoverActionOwners(t *testing.T) {
+	for _, tc := range []struct {
+		name, actions string
+		conflict      bool
+	}{
+		{"争用", `[{"id":"object:get","level":"auto","read_only":true}]`, true},
+		{"非法等级", `[{"id":"object:get","level":"fast"}]`, false},
+		{"缺少等级", `[{"id":"object:get"}]`, false},
+		{"重复声明", `[{"id":"x","level":"auto"},{"id":"x","level":"deny"}]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			for id, extra := range map[string]string{"one": `,"actions":` + tc.actions, "two": `,"actions":[{"id":"object:get","level":"confirm"}]`, "dependent": `,"requires":["one"]`, "free": ""} {
+				putManifest(t, root, id, manifestText(id, extra))
+			}
+			r := Discover(root)
+			for id, rejected := range map[string]bool{"one": true, "two": tc.conflict, "dependent": true, "free": false} {
+				err := r.Rejected[filepath.Join(root, id, "manifest.json")]
+				loaded := slices.ContainsFunc(r.Extensions, func(e Extension) bool { return e.Manifest.ID == id })
+				if loaded == rejected || (err != nil) != rejected || err != nil && id != "dependent" && !strings.Contains(err.Error(), "actions") {
+					t.Errorf("%s: %v", id, err)
+				}
+			}
+		})
 	}
 }
