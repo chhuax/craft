@@ -2,11 +2,16 @@ package store
 
 import (
 	"database/sql"
+	"errors"
+	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+
+	"modernc.org/sqlite"
 )
 
 func openTestDB(t *testing.T, path string) *SQLite {
@@ -42,10 +47,10 @@ func TestSQLiteVersion(t *testing.T) {
 		t.Fatalf("SQLite %s，需要 3.31 或更高版本", version)
 	}
 
-	if _, err := s.writer.Exec(`CREATE TABLE probe (value TEXT, last TEXT AS (json_extract(value, '$[#-1]')))`); err != nil {
+	if _, err := s.writer.ExecContext(t.Context(), `CREATE TABLE probe (value TEXT, last TEXT AS (json_extract(value, '$[#-1]')))`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.writer.Exec(`INSERT INTO probe (value) VALUES ('["first","last"]')`); err != nil {
+	if _, err := s.writer.ExecContext(t.Context(), `INSERT INTO probe (value) VALUES ('["first","last"]')`); err != nil {
 		t.Fatal(err)
 	}
 	var last string
@@ -71,7 +76,7 @@ func TestSchemaV1(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer rows.Close()
+			defer closeTest(t, rows)
 			var got []string
 			for rows.Next() {
 				var col string
@@ -89,8 +94,12 @@ func TestSchemaV1(t *testing.T) {
 
 func TestNewerSchemaRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "newer.db")
-	s := openTestDB(t, path)
-	if _, err := s.writer.Exec("PRAGMA user_version = 2"); err != nil {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTest(t, db)
+	if _, err := db.Exec("PRAGMA user_version = 2"); err != nil {
 		t.Fatal(err)
 	}
 	other, err := OpenSQLite(t.Context(), path, nil)
@@ -106,8 +115,12 @@ func TestNewerSchemaRefused(t *testing.T) {
 		t.Fatalf("错误缺少库版本或程序版本：%v", err)
 	}
 	var version int
-	if err := s.reader.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
 		t.Fatalf("拒绝打开后 user_version = %d, %v", version, err)
+	}
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || mode != "delete" {
+		t.Fatalf("拒绝打开后 journal_mode = %q, %v", mode, err)
 	}
 }
 
@@ -117,13 +130,13 @@ func TestMigrationRollsBackDDL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer closeTest(t, db)
 	// 在迁移的最后一张表制造冲突，先前已执行的 DDL 和版本号必须一起回滚。
 	if _, err := db.Exec("CREATE TABLE ext_state (old TEXT)"); err != nil {
 		t.Fatal(err)
 	}
 	if s, err := OpenSQLite(t.Context(), path, nil); err == nil {
-		defer s.Close()
+		defer closeTest(t, s)
 		t.Fatal("存在表冲突时仍然完成了迁移")
 	}
 	var tables, version int
@@ -143,16 +156,23 @@ func TestSQLiteConnections(t *testing.T) {
 	// 文件名里的 URI 特殊字符必须原样保留，不能成为连接参数。
 	path := filepath.Join(t.TempDir(), "连接 #%.db")
 	s := openTestDB(t, path)
-	for _, db := range []*sql.DB{s.writer, s.reader} {
-		checkConnection(t, db)
+	checkConnection(t, s.writer)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
 	}
 	conn, err := s.reader.Conn(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer closeTest(t, conn)
+	checkConnection(t, conn)
 	// 占用第一条读连接，迫使连接池为第二个使用者创建新的连接。
-	checkConnection(t, s.reader)
+	second, err := s.reader.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTest(t, second)
+	checkConnection(t, second)
 	if _, err := conn.ExecContext(t.Context(), "DELETE FROM watch_kv"); err == nil {
 		t.Fatal("只读连接接受了写入")
 	}
@@ -166,13 +186,13 @@ func TestSQLiteConnections(t *testing.T) {
 		return v
 	}
 	before := version()
-	if _, err := s.writer.Exec("INSERT INTO watch_kv VALUES ('local','1')"); err != nil {
+	if _, err := s.writer.ExecContext(t.Context(), "INSERT INTO watch_kv VALUES ('local','1')"); err != nil {
 		t.Fatal(err)
 	}
 	if v := version(); v != before {
 		t.Fatalf("自己的写入改变了 data_version: %d -> %d", before, v)
 	}
-	if _, err := other.writer.Exec("INSERT INTO watch_kv VALUES ('other','1')"); err != nil {
+	if _, err := other.writer.ExecContext(t.Context(), "INSERT INTO watch_kv VALUES ('other','1')"); err != nil {
 		t.Fatal(err)
 	}
 	if v := version(); v == before {
@@ -180,19 +200,63 @@ func TestSQLiteConnections(t *testing.T) {
 	}
 }
 
-func checkConnection(t *testing.T, db *sql.DB) {
+func closeTest(t *testing.T, resource io.Closer) {
 	t.Helper()
-	conn, err := db.Conn(t.Context())
-	if err != nil {
-		t.Fatal(err)
+	if err := resource.Close(); err != nil {
+		t.Error(err)
 	}
-	defer conn.Close()
+}
+
+func checkConnection(t *testing.T, conn *sql.Conn) {
+	t.Helper()
 	for name, want := range map[string]string{
 		"journal_mode": "wal", "synchronous": "2", "busy_timeout": "5000", "foreign_keys": "1",
 	} {
 		var got string
 		if err := conn.QueryRowContext(t.Context(), "PRAGMA "+name).Scan(&got); err != nil || got != want {
 			t.Errorf("%s = %q, %v，期望 %q", name, got, err, want)
+		}
+	}
+}
+
+func TestImmediateWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writers.db")
+	first := openTestDB(t, path)
+	second := openTestDB(t, path)
+	ctx := t.Context()
+	// 第二个实例立即报告锁冲突，测试无需等候 busy_timeout 到期。
+	if _, err := second.writer.ExecContext(ctx, "PRAGMA busy_timeout = 0"); err != nil {
+		t.Fatal(err)
+	}
+	err := first.Atomic(ctx, func(Tx) error {
+		// 首个事务还未读写文档，此时已经持有写锁才能证明使用了 IMMEDIATE。
+		err := second.Atomic(ctx, func(Tx) error { return nil })
+		var sqliteErr *sqlite.Error
+		const sqliteBusy = 5
+		if !errors.As(err, &sqliteErr) || sqliteErr.Code() != sqliteBusy {
+			t.Fatalf("第二个写者应收到 SQLITE_BUSY，实际为 %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Atomic(ctx, func(Tx) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestActiveIndexes(t *testing.T) {
+	s := openTestDB(t, filepath.Join(t.TempDir(), "indexes.db"))
+	for table, field := range map[string]string{"watch_thread": "closed", "watch_work": "ended"} {
+		var id, parent, unused int
+		var detail string
+		plan := "EXPLAIN QUERY PLAN SELECT key, value FROM " + table + " WHERE " + field + " IS NULL"
+		if err := s.reader.QueryRow(plan).Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(detail, table+"_active") {
+			t.Errorf("%s 的活跃集未使用部分索引：%s", table, detail)
 		}
 	}
 }
