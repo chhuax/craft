@@ -234,3 +234,92 @@ func events(t *testing.T, s engine.Store) {
 		return nil
 	}))
 }
+
+func assessmentIndexes(t *testing.T, s engine.Store) {
+	ctx := t.Context()
+	th := engine.Thread{Key: "one", Evaluating: &engine.Evaluation{ID: "first"}}
+	d := engine.Decision{ID: "choice", ThreadKey: th.Key, TriggerIDs: []string{"a", "b"}, Kind: engine.Accept, WorkID: "w"}
+	must(t, s.Atomic(ctx, func(u engine.Unit) error {
+		must(t, u.PutThread(th))
+		must(t, u.PutDecision(d))
+		for _, w := range []engine.Work{{ID: "middle", CreatedAt: "2"}, {ID: "latest", CreatedAt: "3"}, {ID: "oldest", CreatedAt: "1"}, {ID: "ended", CreatedAt: "4", Ended: &engine.WorkEnd{}}} {
+			must(t, u.PutWork(w))
+		}
+		return nil
+	}))
+	check := func(r engine.Reader) {
+		got, err := r.ThreadByEval("first")
+		must(t, err)
+		if got == nil || got.Key != th.Key {
+			t.Fatalf("研判索引 %+v", got)
+		}
+		ds, err := r.AcceptedByTrigger("a", "b", "absent")
+		must(t, err)
+		if len(ds) != 2 || ds["a"].DecisionID != d.ID || ds["b"].WorkID != "w" {
+			t.Fatalf("已接事件索引 %+v", ds)
+		}
+		history, err := r.DecisionsByThread(th.Key)
+		must(t, err)
+		if len(history) != 1 || history[0].ID != d.ID {
+			t.Fatalf("对象历史 %+v", history)
+		}
+		for _, tc := range []struct {
+			limit int
+			skip  []string
+			want  []string
+		}{
+			{0, nil, nil}, {-1, nil, nil}, {1, nil, []string{"latest"}}, {3, []string{"latest", "missing"}, []string{"middle", "oldest"}},
+		} {
+			rows, err := r.RecentOpenWorks(tc.limit, tc.skip...)
+			must(t, err)
+			var ids []string
+			for _, w := range rows {
+				ids = append(ids, w.ID)
+			}
+			if !slices.Equal(ids, tc.want) {
+				t.Errorf("最近在办 %v，期望 %v", ids, tc.want)
+			}
+		}
+	}
+	must(t, s.Atomic(ctx, func(u engine.Unit) error {
+		check(u)
+		err := u.Atomic(ctx, func(c engine.Unit) error {
+			th.Evaluating = &engine.Evaluation{ID: "second"}
+			must(t, c.PutThread(th))
+			th.Evaluating = nil
+			must(t, c.PutThread(th))
+			for _, id := range []string{"first", "second"} {
+				v, err := c.ThreadByEval(id)
+				must(t, err)
+				if v != nil {
+					t.Fatalf("残留研判 %s", id)
+				}
+			}
+			d.Kind = engine.Ignore
+			d.ThreadKey = "two"
+			must(t, c.PutDecision(d))
+			ds, err := c.AcceptedByTrigger("a", "b")
+			must(t, err)
+			history, err := c.DecisionsByThread(th.Key)
+			must(t, err)
+			if len(ds)+len(history) != 0 {
+				t.Fatal("改写后遗留决策索引")
+			}
+			must(t, c.PutWork(engine.Work{ID: "latest", Ended: &engine.WorkEnd{}}))
+			must(t, c.PutWork(engine.Work{ID: "ended", CreatedAt: "0"}))
+			must(t, c.PutWork(engine.Work{ID: "oldest", CreatedAt: "9"}))
+			must(t, c.PutWork(engine.Work{ID: "after", CreatedAt: "9"}))
+			rows, err := c.RecentOpenWorks(5)
+			must(t, err)
+			if len(rows) != 4 || rows[0].ID != "after" || rows[1].ID != "oldest" || rows[3].ID != "ended" {
+				t.Fatalf("改写后的顺序 %v", rows)
+			}
+			return errRollback
+		})
+		if !errors.Is(err, errRollback) {
+			return err
+		}
+		check(u)
+		return nil
+	}))
+}

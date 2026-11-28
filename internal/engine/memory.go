@@ -25,6 +25,7 @@ func NewMemory() Store {
 type memoryView struct {
 	triggers, dispositions, threads, works, decisions *indexNode
 	active, open, triggersByThread, threadsByTrigger  *indexNode
+	byEval, recentOpen, accepted, decisionsByThread   *indexNode
 	insertions                                        uint64
 	rev                                               int64
 	// 只向已提交前缀之后追加。每个快照保留自己的长度，旧读者不会访问新槽位。

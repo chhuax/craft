@@ -19,12 +19,12 @@ func (u *memoryUnit) put(tree **indexNode, key string, v any) error {
 	return nil
 }
 
-func (u *memoryUnit) putIndexed(tree, index **indexNode, key string, v any, active bool) error {
+func (u *memoryUnit) putIndexed(tree, index **indexNode, key string, v any, active bool, lookup string) error {
 	raw, err := jsonv2.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("编码 %T[%q]: %w", v, key, err)
 	}
-	row := &memoryRow{data: raw}
+	row := &memoryRow{data: raw, lookup: lookup}
 	if old := (*tree).get(key); old != nil {
 		row.order = old.order
 	} else {
@@ -53,14 +53,68 @@ func (u *memoryUnit) PutDisposition(id string, v TriggerDisposition) error {
 }
 
 func (u *memoryUnit) PutThread(v Thread) error {
-	return u.putIndexed(&u.threads, &u.active, v.Key, &v, v.Closed == nil && v.Evaluating == nil && len(v.Pending) > 0)
+	eval := ""
+	if v.Evaluating != nil {
+		eval = v.Evaluating.ID
+	}
+	old := u.threads.get(v.Key)
+	if err := u.putIndexed(&u.threads, &u.active, v.Key, &v, v.Closed == nil && v.Evaluating == nil && len(v.Pending) > 0, eval); err != nil {
+		return err
+	}
+	if old != nil && old.lookup != "" && old.lookup != eval {
+		u.byEval = u.byEval.set(u.mark, old.lookup, nil)
+	}
+	if eval != "" {
+		u.byEval = u.byEval.set(u.mark, eval, u.threads.get(v.Key))
+	}
+	return nil
 }
 
 func (u *memoryUnit) PutWork(v Work) error {
-	return u.putIndexed(&u.works, &u.open, v.ID, &v, v.Ended == nil)
+	key := ""
+	if v.Ended == nil {
+		key = v.CreatedAt + "\x00"
+	}
+	old := u.works.get(v.ID)
+	if err := u.putIndexed(&u.works, &u.open, v.ID, &v, v.Ended == nil, key); err != nil {
+		return err
+	}
+	if old != nil && old.lookup != "" && old.lookup != key {
+		u.recentOpen = u.recentOpen.set(u.mark, old.lookup+old.order, nil)
+	}
+	if key != "" && (old == nil || old.lookup != key) {
+		u.recentOpen = u.recentOpen.set(u.mark, key+u.works.get(v.ID).order, &memoryRow{data: []byte(v.ID)})
+	}
+	return nil
 }
 
-func (u *memoryUnit) PutDecision(v Decision) error { return u.put(&u.decisions, v.ID, &v) }
+func (u *memoryUnit) PutDecision(v Decision) error {
+	old, err := u.GetDecision(v.ID)
+	if err != nil {
+		return err
+	}
+	if err = u.put(&u.decisions, v.ID, &v); err != nil {
+		return err
+	}
+	if old != nil {
+		u.indexDecision(old, nil)
+	}
+	u.indexDecision(&v, u.decisions.get(v.ID))
+	return nil
+}
+
+func (u *memoryUnit) indexDecision(d *Decision, row *memoryRow) {
+	u.decisionsByThread = u.decisionsByThread.set(u.mark, linkPrefix(d.ThreadKey)+d.ID, row)
+	if d.Kind == Accept && d.WorkID != "" {
+		// 一个批次共享两项定位信息。预检任一事件的开销不依赖历史批次长度。
+		if row != nil {
+			row = &memoryRow{data: []byte(d.ID), lookup: d.WorkID}
+		}
+		for _, id := range d.TriggerIDs {
+			u.accepted = u.accepted.set(u.mark, linkPrefix(id)+d.ID, row)
+		}
+	}
+}
 
 func (row *memoryRow) decode(dst any) error {
 	if err := jsonv2.Unmarshal(row.data, dst); err != nil {

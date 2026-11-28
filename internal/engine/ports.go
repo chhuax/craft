@@ -38,6 +38,12 @@ type Store interface {
 	Subscribe(func(Event))
 }
 
+// Acceptance 只定位首次建单，不为批内每个事件重复加载整份历史决策。
+type Acceptance struct {
+	DecisionID string
+	WorkID     string
+}
+
 // Reader 仅供当前事务回调使用。所有查询结果（包括嵌套字段）均由调用方独占。
 // 单键缺失返回 nil, nil；批量按键取，省略缺失项，重复键只返回一份。
 type Reader interface {
@@ -58,6 +64,14 @@ type Reader interface {
 	ActiveThreadsWithPending() ([]Thread, error)
 	// 在办 Work 按首次插入的倒序返回；改写和恢复不改变插入位置。
 	OpenWorks() ([]Work, error)
+	// RecentOpenWorks 按 createdAt 倒序（同毫秒按首次插入倒序）返回至多 limit 个未排除的在办 Work，非正上限返回空。
+	RecentOpenWorks(limit int, exclude ...string) ([]Work, error)
+	// ThreadByEval 仅命中当前仍在进行的研判，结束或被替换后立即失效。
+	ThreadByEval(evalID string) (*Thread, error)
+	// AcceptedByTrigger 按批内事件键查曾经建单的决策，后续 ignore 不抹去授权历史。
+	AcceptedByTrigger(ids ...string) (map[string]Acceptance, error)
+	// DecisionsByThread 返回该对象的全部决策，顺序未指定。
+	DecisionsByThread(key string) ([]Decision, error)
 	// EventsSince 按 rev 升序补拉严格晚于游标的至多 limit 条记录。
 	EventsSince(rev int64, limit int) ([]Event, error)
 }

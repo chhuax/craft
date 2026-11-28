@@ -2,6 +2,7 @@ package engine
 
 import (
 	"cmp"
+	"iter"
 	"slices"
 	"strings"
 )
@@ -19,8 +20,9 @@ type indexNode struct {
 type writeMark byte
 
 type memoryRow struct {
-	data  []byte
-	order string // 首次插入的位置，仅活跃集需要
+	data   []byte
+	lookup string // 辅助索引的关联键；更新聚合时用它移除旧项
+	order  string // 首次插入的位置，仅活跃集需要
 }
 
 func (n *indexNode) edge(b byte) (int, bool) {
@@ -124,4 +126,21 @@ func (n *indexNode) walk(visit func(*memoryRow) error) error {
 		}
 	}
 	return nil
+}
+
+// 倒序遍历支持读足即停；压缩树没有空分叉，访问量由返回数和跳过数决定。
+func (n *indexNode) reverseRows() iter.Seq[*memoryRow] {
+	return func(yield func(*memoryRow) bool) { n.walkReverse(yield) }
+}
+
+func (n *indexNode) walkReverse(yield func(*memoryRow) bool) bool {
+	if n == nil {
+		return true
+	}
+	for i := len(n.children) - 1; i >= 0; i-- {
+		if !n.children[i].walkReverse(yield) {
+			return false
+		}
+	}
+	return n.row == nil || yield(n.row)
 }
