@@ -165,6 +165,7 @@ func (x *executor) setState(s host.Session, state host.State) {
 }
 
 var errStale = errors.New("派工已更换或结束")
+var errStopPending = fmt.Errorf("等待旧会话停止: %w", host.Later)
 
 func (x *executor) current(ctx context.Context, p assignmentRef) (*engine.Work, error) {
 	if err := ctx.Err(); err != nil {
@@ -190,7 +191,7 @@ func (x *executor) current(ctx context.Context, p assignmentRef) (*engine.Work, 
 				return err
 			}
 			if ok {
-				return host.Later
+				return errStopPending
 			}
 		}
 		return nil

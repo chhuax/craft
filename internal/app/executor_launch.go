@@ -14,11 +14,18 @@ import (
 
 func (x *executor) launch(ctx context.Context, p assignmentRef, attempts int) error {
 	w, err := x.current(ctx, p)
-	if err != nil {
+	// 旧会话的 stop 只阻止开工；已交给人或缺少目标的派工应先收尾。
+	if err != nil && !errors.Is(err, errStopPending) {
 		return err
 	}
-	if latest(w).State != engine.AssignmentPending || engine.WorkStage(*w).Stage == "person" || w.Execution == nil || w.Execution.Target == nil {
+	if latest(w).State != engine.AssignmentPending || engine.WorkStage(*w).Stage == "person" {
 		return nil
+	}
+	if w.Execution == nil || w.Execution.Target == nil {
+		return x.launchFailed(ctx, p, "没有执行目标：该 Work 缺少执行目标（可能是损坏或旧数据），请重试或停止")
+	}
+	if err != nil {
+		return err
 	}
 	if err := x.reserve(ctx, w.ID, false); err != nil {
 		return err
@@ -33,12 +40,17 @@ func (x *executor) launch(ctx context.Context, p assignmentRef, attempts int) er
 	}
 	var failure *launchFailure
 	if errors.As(err, &failure) || errors.Is(err, errTransient) {
-		_, err = x.r.Commands.Report(ctx, w.ID, p.AssignmentID, engine.WorkerReport{State: engine.Failed, Summary: err.Error()})
+		return x.launchFailed(ctx, p, err.Error())
 	}
 	return err
 }
 
 type launchFailure struct{ error }
+
+func (x *executor) launchFailed(ctx context.Context, p assignmentRef, summary string) error {
+	_, err := x.r.Commands.Report(ctx, p.WorkID, p.AssignmentID, engine.WorkerReport{State: engine.Failed, Summary: summary})
+	return err
+}
 
 func (x *executor) dispatchAssignment(ctx context.Context, w *engine.Work, p assignmentRef) error {
 	s := sessionOf(w)

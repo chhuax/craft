@@ -67,6 +67,46 @@ func TestExecutorFirstDelivery(t *testing.T) {
 		}
 	}
 }
+func TestLaunchWithoutTarget(t *testing.T) {
+	for _, execution := range []*engine.Execution{nil, {}} {
+		x, driver, row := workerFixture(t, true)
+		ctx := t.Context()
+		w, err := x.work(ctx, "work")
+		checkErr(t, err)
+		w.Execution = execution
+		checkErr(t, x.r.repo.Atomic(ctx, func(u engine.Unit) error {
+			if execution == nil {
+				// 无须启动会话的失败回报可以先于旧会话停止。
+				w.Assignments = append([]engine.Assignment{{ID: "old", State: engine.AssignmentEnded}}, w.Assignments...)
+				if err := u.Effects().Enqueue("stop", "old", []byte(`{}`)); err != nil {
+					return err
+				}
+			}
+			return u.PutWork(*w)
+		}))
+		var reportID string
+		for range 2 {
+			res := x.run(ctx, row)
+			if res.Err != nil || res.Later {
+				t.Fatal("缺少目标不应让 effect 重试", res)
+			}
+			w, err = x.work(ctx, w.ID)
+			checkErr(t, err)
+			stage, report := engine.WorkStage(*w), latest(w).Report
+			if stage.Stage != "person" || stage.Action != "failed" || report == nil || !strings.Contains(report.Summary, "没有执行目标") {
+				t.Fatalf("空目标没有交人处理：阶段 %+v，报告 %+v", stage, report)
+			}
+			if report.ID == "" || reportID != "" && report.ID != reportID {
+				t.Fatal("重放更改了报告", report)
+			}
+			reportID = report.ID
+		}
+		if len(driver.Calls()) != 0 {
+			t.Fatal("空目标仍调用了宿主", driver.Calls())
+		}
+	}
+}
+
 func TestExecutorUnknown(t *testing.T) {
 	for _, sep := range []bool{false, true} {
 		x, d, row := workerFixture(t, sep)
