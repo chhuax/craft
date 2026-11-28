@@ -128,3 +128,37 @@ func TestPolicyRestartAndAtomicity(t *testing.T) {
 	}))
 	checkErr(t, r.Stop(ctx))
 }
+
+func TestCommandPolicyConcurrentWriters(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CRAFT_HOME", home)
+	clock := func() string { return "2026-01-01T00:00:00.000Z" }
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, patch := range []string{`{"paused":true}`, `{"allowedSenders":[{"source":"feed","id":"reader"}]}`} {
+		c, err := OpenCommands(t.Context(), home, clock, nil)
+		checkErr(t, err)
+		t.Cleanup(func() {
+			if err := c.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		go func() {
+			<-start
+			_, err := c.SetPolicy(t.Context(), []byte(patch))
+			results <- err
+		}()
+	}
+	close(start)
+	for range 2 {
+		checkErr(t, <-results)
+	}
+	err := ViewCommands(t.Context(), home, func(r CommandReader) error {
+		p, err := r.Policy()
+		if err == nil && (!p.Settings.Paused || len(p.Settings.AllowedSenders) != 1) {
+			t.Errorf("并发覆盖了另一条命令的字段：%+v", p.Settings)
+		}
+		return err
+	})
+	checkErr(t, err)
+}
