@@ -55,6 +55,9 @@ type storeFactory func(*testing.T, *slog.Logger) store.Store
 func runStoreTests(t *testing.T, factory storeFactory) {
 	for name, run := range map[string]func(*testing.T, storeFactory){
 		"Documents":         testDocuments,
+		"PutMany":           testPutMany,
+		"PutManyRejected":   testPutManyRejected,
+		"PutManyRollback":   testPutManyRollback,
 		"Rollback":          testRollback,
 		"AfterCommit":       testAfterCommit,
 		"ReadIsolation":     testReadIsolation,
@@ -102,6 +105,84 @@ func testDocuments(t *testing.T, factory storeFactory) {
 		checkDoc(t, tx, kv, "a", "")
 		checkDoc(t, tx, "watch_trigger", "a", original)
 		checkDoc(t, tx, kv, "b", "true")
+		return nil
+	}))
+}
+
+func testPutMany(t *testing.T, factory storeFactory) {
+	s := factory(t, nil)
+	ctx := t.Context()
+	const original = `{ "z":9007199254740993, "a":{"unknown":[true,null]} }`
+	docs := []store.Doc{
+		{Key: "a", Value: json.RawMessage("false")},
+		{Key: "b", Value: json.RawMessage("null")},
+		{Key: "a", Value: json.RawMessage(original)},
+	}
+	requireOK(t, s.Atomic(ctx, func(tx store.Tx) error {
+		requireOK(t, tx.PutMany(kv, docs))
+		docs[2].Value[0] = '['
+		requireOK(t, tx.PutMany(kv, []store.Doc{}))
+		return tx.PutMany("unknown", nil)
+	}))
+	requireOK(t, s.Read(ctx, func(tx store.ReadTx) error {
+		checkDoc(t, tx, kv, "a", original)
+		checkDoc(t, tx, kv, "b", "null")
+		return nil
+	}))
+}
+
+func testPutManyRejected(t *testing.T, factory storeFactory) {
+	s := factory(t, nil)
+	ctx := t.Context()
+	docs := []store.Doc{
+		{Key: "existing", Value: json.RawMessage("2")},
+		{Key: "added", Value: json.RawMessage("true")},
+		{Key: "bad", Value: json.RawMessage(`{"x":}`)},
+		{Key: "last", Value: json.RawMessage("null")},
+	}
+	requireOK(t, s.Atomic(ctx, func(tx store.Tx) error {
+		requireOK(t, tx.Put(kv, "existing", json.RawMessage("1")))
+		if err := tx.PutMany("unknown", docs[:1]); err == nil {
+			t.Fatal("批量写入接受了未注册的集合")
+		}
+		if err := tx.PutMany(kv, docs); err == nil {
+			t.Fatal("批量写入接受了非法 JSON")
+		}
+		// 提交外层事务，确保回滚不会掩盖部分写入。
+		return nil
+	}))
+	requireOK(t, s.Read(ctx, func(tx store.ReadTx) error {
+		checkDoc(t, tx, kv, "existing", "1")
+		for _, key := range []string{"added", "bad", "last"} {
+			checkDoc(t, tx, kv, key, "")
+		}
+		return nil
+	}))
+}
+
+func testPutManyRollback(t *testing.T, factory storeFactory) {
+	s := factory(t, nil)
+	ctx := t.Context()
+	fail := errors.New("撤销内层批量写入")
+	requireOK(t, s.Atomic(ctx, func(tx store.Tx) error {
+		requireOK(t, tx.Put(kv, "outer", json.RawMessage("1")))
+		err := tx.Atomic(ctx, func(inner store.Tx) error {
+			requireOK(t, inner.PutMany(kv, []store.Doc{
+				{Key: "outer", Value: json.RawMessage("2")},
+				{Key: "inner", Value: json.RawMessage("true")},
+			}))
+			checkDoc(t, inner, kv, "outer", "2")
+			checkDoc(t, inner, kv, "inner", "true")
+			return fail
+		})
+		if !errors.Is(err, fail) {
+			t.Fatalf("内层回滚 = %v", err)
+		}
+		return nil
+	}))
+	requireOK(t, s.Read(ctx, func(tx store.ReadTx) error {
+		checkDoc(t, tx, kv, "outer", "1")
+		checkDoc(t, tx, kv, "inner", "")
 		return nil
 	}))
 }

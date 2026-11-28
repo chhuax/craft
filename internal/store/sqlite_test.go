@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -26,6 +27,37 @@ func openTestDB(t *testing.T, path string) *SQLite {
 		}
 	})
 	return s
+}
+
+// TestPutManySQLiteJSON 验证数据库拒绝文档时，外层事务仍能提交先前的修改。
+func TestPutManySQLiteJSON(t *testing.T) {
+	s := openTestDB(t, filepath.Join(t.TempDir(), "depth.db"))
+	// 这份 JSON 合乎语法，但嵌套层数超过了 SQLite JSON 解析器的上限。
+	deep := json.RawMessage(strings.Repeat("[", 1001) + "0" + strings.Repeat("]", 1001))
+	const table = "watch_kv"
+	err := s.Atomic(t.Context(), func(tx Tx) error {
+		if err := tx.Put(table, "existing", json.RawMessage("1")); err != nil {
+			return err
+		}
+		err := tx.PutMany(table, []Doc{
+			{Key: "existing", Value: json.RawMessage("2")},
+			{Key: "deep", Value: deep},
+		})
+		if err == nil {
+			t.Fatal("SQLite 接受了嵌套过深的 JSON")
+		}
+		raw, found, err := tx.Get(table, "existing")
+		if err != nil {
+			return err
+		}
+		if !found || string(raw) != "1" {
+			t.Fatalf("批量写入失败后原文档 = %s, %v", raw, found)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSQLiteVersion(t *testing.T) {
