@@ -32,7 +32,7 @@ type DaemonConfig struct {
 	OnEvent func()
 }
 
-// AlarmOverride 以扩展限定的闹钟 ID 寻址；省略的字段沿用 manifest。
+// AlarmOverride 以登记的闹钟 ID 寻址；省略的字段沿用内核或扩展的默认值。
 type AlarmOverride struct {
 	Every   time.Duration
 	Enabled *bool
@@ -279,10 +279,18 @@ func (d *Daemon) startAlarms(ctx context.Context, exts []exthost.Extension) erro
 		return err
 	}
 	d.alarms = s
+	d.queue = newAlarmQueue(d.db, s)
 	if err := s.Register(alarm.AlarmSpec{ID: "watch.sessions", Every: 10 * time.Second, Group: "watch", Run: d.executor.monitor}); err != nil {
 		return err
 	}
-	d.queue = newAlarmQueue(d.db, s)
+	override := d.cfg.AlarmOverrides["watch.prune"]
+	prune := alarm.AlarmSpec{ID: "watch.prune", Group: "watch", At: "00:00", Enabled: override.Enabled, Run: d.prune}
+	if override.Every != 0 {
+		prune.Every, prune.At = override.Every, ""
+	}
+	if err := s.Register(prune); err != nil {
+		return fmt.Errorf("登记保留期清理闹钟: %w", err)
+	}
 	if err := d.queue.recover(ctx); err != nil {
 		return err
 	}

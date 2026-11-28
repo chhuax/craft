@@ -46,7 +46,8 @@ func checkVersion(row *sql.Row) error {
 	if err := row.Scan(&version); err != nil {
 		return fmt.Errorf("读取数据库版本: %w", err)
 	}
-	if version != 1 {
+	// v2 只新增清理索引；只读查询与宿主通知仍可在尚未迁移的 v1 文档上工作。
+	if version != 1 && version != 2 {
 		return fmt.Errorf("不支持数据库版本 %d", version)
 	}
 	return nil

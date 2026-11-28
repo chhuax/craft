@@ -48,6 +48,11 @@ func (u *memoryUnit) PutTrigger(v Trigger) error {
 	if err := u.put(&u.triggers, v.ID, &v); err != nil {
 		return err
 	}
+	p := retentionIndex{at: v.At}
+	for _, ref := range v.Threads {
+		p.add("thread", ThreadKey(ref))
+	}
+	u.retention("trigger", v.ID, nil, u.triggers.get(v.ID), p)
 	if len(v.Threads) > 0 {
 		key := ThreadKey(v.Threads[0])
 		u.triggers.get(v.ID).lookup = key
@@ -66,7 +71,12 @@ func (u *memoryUnit) PutTrigger(v Trigger) error {
 }
 
 func (u *memoryUnit) PutDisposition(id string, v TriggerDisposition) error {
-	return u.put(&u.dispositions, id, &v)
+	old := u.dispositions.get(id)
+	if err := u.put(&u.dispositions, id, &v); err != nil {
+		return err
+	}
+	u.retention("disposition", id, old, u.dispositions.get(id), dispositionRetention(&v))
+	return nil
 }
 
 func (u *memoryUnit) PutThread(v Thread) error {
@@ -79,6 +89,7 @@ func (u *memoryUnit) PutThread(v Thread) error {
 		return err
 	}
 	row := u.threads.get(v.Key)
+	u.retention("thread", v.Key, old, row, threadRetention(&v))
 	u.indexSubscriptions(v, old, row)
 	if old != nil && old.lookup != "" && old.lookup != eval {
 		u.byEval = u.byEval.set(u.mark, old.lookup, nil)
@@ -123,6 +134,7 @@ func (u *memoryUnit) PutWork(v Work) error {
 	if err != nil {
 		return err
 	}
+	p := workRetention(&v)
 	v.Inputs = nil
 	v.Undelivered = nil
 	old := u.works.get(v.ID)
@@ -136,6 +148,7 @@ func (u *memoryUnit) PutWork(v Work) error {
 		u.recentOpen = u.recentOpen.set(u.mark, key+u.works.get(v.ID).order, &memoryRow{data: []byte(v.ID)})
 	}
 	row := u.works.get(v.ID)
+	u.retention("work", v.ID, old, row, p)
 	row.inputs = inputs
 	if v.Ended == nil {
 		row.origin = v.Origin.TriggerID
@@ -165,6 +178,7 @@ func (r *memoryView) OpenOriginWorkID(key string) (string, error) {
 }
 
 func (u *memoryUnit) PutDecision(v Decision) error {
+	previous := u.decisions.get(v.ID)
 	old, err := u.GetDecision(v.ID)
 	if err != nil {
 		return err
@@ -175,7 +189,17 @@ func (u *memoryUnit) PutDecision(v Decision) error {
 	if old != nil {
 		u.indexDecision(old, nil)
 	}
-	u.indexDecision(&v, u.decisions.get(v.ID))
+	row := u.decisions.get(v.ID)
+	p := retentionIndex{at: v.At}
+	for _, r := range v.Reason {
+		p.add("trigger", r.TriggerID, r.Values["trigger"])
+		p.add("work", r.Values["work"])
+	}
+	p.add("thread", v.ThreadKey)
+	p.add("trigger", v.TriggerIDs...)
+	p.add("work", v.WorkID)
+	u.retention("decision", v.ID, previous, row, p)
+	u.indexDecision(&v, row)
 	return nil
 }
 

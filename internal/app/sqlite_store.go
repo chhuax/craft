@@ -106,3 +106,8 @@ func deliverEvent(fn func(engine.Event), raw []byte) {
 	}
 	fn(e)
 }
+
+// Prune 复用命令已经持有的写事务，使引用保护与级联同时生效。
+func (u *engineUnit) Prune(triggerBefore, workBefore, eventBefore string) (engine.PruneResult, error) {
+	return u.tx.Prune(triggerBefore, workBefore, eventBefore)
+}

@@ -250,7 +250,7 @@ func TestDaemonEndToEnd(t *testing.T) {
 		}
 	})
 	alarms := d.alarms.List()
-	if len(alarms) != 3 || alarms[2].ID != "watch.sessions" || alarms[0].ID != "reader:poll" || !alarms[0].Next.Equal(clock.Now().Add(2*time.Hour)) || alarms[1].State != "disabled" {
+	if len(alarms) != 4 || alarms[2].ID != "watch.prune" || alarms[2].Next.Hour() != 0 || alarms[2].Next.Minute() != 0 || alarms[3].ID != "watch.sessions" || alarms[0].ID != "reader:poll" || !alarms[0].Next.Equal(clock.Now().Add(2*time.Hour)) || alarms[1].State != "disabled" {
 		t.Fatalf("用户闹钟覆盖 %v", alarms)
 	}
 	clock.waitTimers(t, 10*time.Second, 1)

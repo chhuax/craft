@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
@@ -15,7 +16,14 @@ func (u *memoryUnit) Enqueue(kind, key string, value json.RawMessage) error {
 	if !jsontext.Value(value).IsValid() {
 		return fmt.Errorf("effect %s[%q] 的值不是有效 JSON", kind, key)
 	}
-	u.effectKeys = u.effectKeys.set(u.mark, linkPrefix(kind)+key, &memoryRow{})
+	p, err := effectRetention(kind, key, bytes.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("读取 %s 请求的引用: %w", kind, err)
+	}
+	id := linkPrefix(kind) + key
+	row := new(memoryRow)
+	u.retention("effect", id, u.effectKeys.get(id), row, p)
+	u.effectKeys = u.effectKeys.set(u.mark, id, row)
 	u.effects = append(u.effects, Effect{Kind: kind, Key: key, Value: bytes.Clone(value)})
 	return nil
 }
@@ -28,7 +36,10 @@ func (u *memoryUnit) Emit(e Event) error {
 	}
 	// 计数器与行同属这个写快照。即使调用方捕获编码错误并继续事务，也不会跳号。
 	u.rev = e.Rev
-	u.events = append(u.events, data)
+	key := revisionKey(e.Rev)
+	row := &memoryRow{data: data}
+	u.events = u.events.set(u.mark, key, row)
+	u.retention("event", key, nil, row, retentionIndex{at: e.At})
 	s := u.store
 	u.AfterCommit(func() { s.broadcast(data) })
 	return nil
@@ -52,19 +63,24 @@ func (s *memoryStore) broadcast(data []byte) {
 }
 
 func (r *memoryView) EventsSince(rev int64, limit int) ([]Event, error) {
-	start := max(rev, 0)
-	if limit <= 0 || start >= int64(len(r.events)) {
+	if limit <= 0 || rev >= r.rev {
 		return nil, nil
 	}
-	count := min(limit, len(r.events)-int(start))
-	out := make([]Event, count)
-	for i, raw := range r.events[int(start) : int(start)+count] {
-		if err := jsonv2.Unmarshal(raw, &out[i]); err != nil {
-			return nil, fmt.Errorf("解码事件 %d: %w", start+int64(i)+1, err)
+	var out []Event
+	for _, row := range r.events.between(revisionKey(max(rev, 0)+1), "") {
+		var e Event
+		if err := jsonv2.Unmarshal(row.data, &e); err != nil {
+			return nil, fmt.Errorf("读取修订 %d 之后的事件: %w", rev, err)
+		}
+		out = append(out, e)
+		if len(out) == limit {
+			break
 		}
 	}
 	return out, nil
 }
+
+func revisionKey(rev int64) string { return string(binary.BigEndian.AppendUint64(nil, uint64(rev))) }
 
 func (r *memoryView) HasEffect(kind, key string) (bool, error) {
 	return r.effectKeys.get(linkPrefix(kind)+key) != nil, nil

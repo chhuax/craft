@@ -117,8 +117,12 @@ func privateDir(root *os.Root, name string) (err error) {
 	return dir.Chmod(".", 0700)
 }
 
+func validScratchID(id string) bool {
+	return filepath.IsLocal(id) && id != "." && !strings.ContainsAny(id, `/\`)
+}
+
 func (p preparer) scratch(workID string) (target engine.PreparedTarget, err error) {
-	if !filepath.IsLocal(workID) || workID == "." || strings.ContainsAny(workID, `/\`) {
+	if !validScratchID(workID) {
 		return target, fmt.Errorf("无效的 scratch 目录名 %q", workID)
 	}
 	root, err := os.OpenRoot(p.stateDir)

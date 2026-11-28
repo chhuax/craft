@@ -110,6 +110,8 @@ type Effects interface {
 // 回滚丢弃回调，单个回调 panic 只记日志，不影响提交结果及后续回调。
 type Unit interface {
 	Reader
+	// Prune 在本事务快照内筛选、核对引用并级联删除。
+	Prune(triggerBefore, workBefore, eventBefore string) (PruneResult, error)
 	Atomic(ctx context.Context, fn func(Unit) error) error
 	AfterCommit(fn func())
 	// Trigger 是不可变事实；重复写入同一 ID 保留第一份记录。
