@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chhuax/craft/internal/app"
+	"github.com/chhuax/craft/internal/conformance"
 	"github.com/chhuax/craft/internal/engine"
 	"github.com/chhuax/craft/pkg/protocol"
 )
@@ -76,6 +77,7 @@ func commands() []commandSpec {
 		{"alarm run", "<ext> <alarm>", "[--wait [SEC]]", person, alarmRun},
 		{"ext enable", "<id>", "", settings, daemonRPC},
 		{"ext disable", "<id>", "", settings, daemonRPC},
+		{"ext test", "<path>", "[--fixtures DIR]", person, extTest},
 		{"ext list", "", "", reader, extList},
 		{"ext logs", "<id>", "[--tail N]", reader, extLogs},
 		{"--help", "", "", local, helpResult},
@@ -136,6 +138,11 @@ func versionResult(i *invocation) (result, error) {
 func doctorResult(i *invocation) (result, error) {
 	return data(app.Doctor(i.ctx, i.getenv, i.userHomeDir))
 }
+func extTest(i *invocation) (result, error) {
+	checks := conformance.Run(i.ctx, i.args[0], conformance.Options{Fixtures: i.flags["--fixtures"], KernelVersion: i.version})
+	return data(checks)
+}
+
 func data(v any) (result, error) { return result{payload: v}, nil }
 
 var errArguments = errors.New("参数错误")
@@ -249,7 +256,8 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 			err = fmt.Errorf("%w: 需要宿主提供当前 worker 会话及派工绑定", errDenied)
 		case spec.role != worker && spec.role != anySession && binding != nil:
 			err = fmt.Errorf("%w: 执行方只能操作自己的 Work", errDenied)
-		default:
+		// 一致性测试只使用用户指定的扩展和临时状态，仍须通过上面的角色检查。
+		case spec.path != "ext test":
 			i.home, err = app.StateHome(getenv, userHomeDir)
 			group, _, _ := strings.Cut(spec.path, " ")
 			if err == nil && i.extensionDirs == nil && (group == "daemon" || group == "ext") {
@@ -265,8 +273,15 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 	if err != nil {
 		return failure(stderr, asJSON, err)
 	}
-	if checks, ok := res.payload.([]app.Check); ok {
-		return reportChecks(stdout, asJSON, checks)
+	switch checks := res.payload.(type) {
+	case []app.Check:
+		return reportChecks(stdout, asJSON, checks, "failed", "安装自检未通过")
+	case []conformance.Check:
+		rows := make([]app.Check, len(checks))
+		for i, c := range checks {
+			rows[i] = app.Check(c)
+		}
+		return reportChecks(stdout, asJSON, rows, "fail", "扩展协议一致性测试未通过")
 	}
 	if err := render(stdout, res, asJSON); err != nil {
 		return failure(stderr, asJSON, err)
@@ -321,13 +336,13 @@ func failure(w io.Writer, asJSON bool, err error) int {
 	}
 	return exit
 }
-func reportChecks(stdout io.Writer, asJSON bool, checks []app.Check) int {
-	ok := !slices.ContainsFunc(checks, func(c app.Check) bool { return c.Status == "failed" })
+func reportChecks(stdout io.Writer, asJSON bool, checks []app.Check, failed, message string) int {
+	ok := !slices.ContainsFunc(checks, func(c app.Check) bool { return c.Status == failed })
 	if asJSON {
 		envelope := map[string]any{"ok": ok, "payload": map[string][]app.Check{"checks": checks}, "evidence": []string{}}
 		// 失败时也保留逐项报告，兼容已经消费 doctor 检查项的调用方。
 		if !ok {
-			envelope["error"] = map[string]any{"code": "checkFailed", "message": "安装自检未通过", "detail": map[string]string{}}
+			envelope["error"] = map[string]any{"code": "checkFailed", "message": message, "detail": map[string]string{}}
 		}
 		if err := json.NewEncoder(stdout).Encode(envelope); err != nil {
 			return 1
