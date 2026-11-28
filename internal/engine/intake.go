@@ -23,9 +23,8 @@ const (
 func (e *Engine) Receive(ctx context.Context, tr Trigger) (ReceiveResult, error) {
 	var result ReceiveResult
 	err := e.cfg.Store.Atomic(ctx, func(u Unit) error {
-		policy := e.cfg.Policy()
 		var err error
-		result, err = e.receive(u, tr, policy)
+		result, err = e.ReceiveIn(u, tr)
 		return err
 	})
 	if err != nil {
@@ -34,7 +33,9 @@ func (e *Engine) Receive(ctx context.Context, tr Trigger) (ReceiveResult, error)
 	return result, nil
 }
 
-func (e *Engine) receive(u Unit, tr Trigger, policy Policy) (ReceiveResult, error) {
+// ReceiveIn 在调用方的写事务内接收事件。调用方须将错误传回事务，提交后结果才生效。
+func (e *Engine) ReceiveIn(u Unit, tr Trigger) (ReceiveResult, error) {
+	policy := e.cfg.Policy()
 	at, err := IsoTime(tr.At)
 	if err != nil {
 		return "", err
