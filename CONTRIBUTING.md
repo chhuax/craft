@@ -2,7 +2,7 @@
 
 ## 准备环境
 
-使用 [go.mod](go.mod) 指定的 Go 工具链。克隆仓库后，在根目录运行 `go build ./...` 和 `go run ./cmd/craft --help`。当前阶段只使用 Go 标准库。安装 Make 后可使用下表中的目标。
+使用 [go.mod](go.mod) 指定的 Go 工具链。克隆仓库后，在根目录运行 `go build ./...` 和 `go run ./cmd/craft --help`。安装 Make 后可使用下表中的目标。
 
 | 命令 | 用途 |
 |---|---|
@@ -28,3 +28,15 @@
 ## 提交与评审
 
 每个提交围绕一个可独立验证的变更。使用中文 Conventional Commits，格式为 `类型(可选范围): 中文摘要`，例如 `feat(engine): 规范化事件时间` 或 `docs: 补充扩展接入说明`。在 PR 中写明动机、可观察到的行为变化和验证结果；触及协议时附上输入输出示例。
+
+## 发布流程
+
+打 tag 前检查以下事项。
+
+- [ ] 待发布提交的 CI 全绿，包括三个操作系统的构建与测试、GitHub 扩展检查和 lint。
+- [ ] 确认版本号和对应的 `v` 前缀 tag 尚未使用。例如，拟发布 `v1.2.3` 时，在该提交运行 `make plugin VERSION=1.2.3`。检查构建成功，`dist/plugin/VERSION`、两份宿主清单及本机二进制版本一致。
+- [ ] 查看打包报告。单个二进制超过 16 MiB、包内文件合计超过 80 MiB 都会产生体积提醒，发布前核对增长是否符合预期。[打包工具说明](tools/package/README.md)
+
+推送以 `v` 开头的版本 tag 后，GoReleaser 将五个系统与架构组合的 CLI 归档和 `checksums.txt` 上传至该版本的 GitHub Release。流水线随后用去掉 `v` 的版本号组装通用包，将 `craft-plugin-<version>.zip`、保留可执行位的 `craft-plugin-<version>.tar.gz` 和这两个文件的 SHA-256 清单 `craft-plugin-<version>-checksums.txt` 上传到同一 Release。
+
+要同时开放宿主安装，先准备专用于分发的 `chhuax/craft-plugin` 仓库。在**源码仓库**的 Settings → Secrets and variables → Actions 中添加名为 `PLUGIN_REPO_TOKEN` 的 repository secret。使用细粒度访问令牌，仅选择分发仓库，授予 **Contents: Read and write**。流水线将包和宿主共用的市场索引同步到分发仓库根目录，一次推送版本提交与同名 tag。未配置此 secret 时，流水线会记录跳过原因，Release 资产仍然可用。[发布工作流](.github/workflows/release.yml)
