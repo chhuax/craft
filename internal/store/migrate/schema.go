@@ -28,6 +28,7 @@ type CollectionSpec struct {
 }
 
 var collections = []CollectionSpec{
+	{Name: "outbox", Table: "outbox", columns: `, state TEXT AS (value->>'$.state'), auto_at INTEGER AS (value->>'$.autoAt')`},
 	{Name: "watch_trigger", Table: "watch_trigger", columns: `, primary_thread TEXT AS (
       json_extract(value,'$.threads[0].source') || ':' || json_extract(value,'$.threads[0].kind') || ':' || json_extract(value,'$.threads[0].id'))`},
 	{Name: "watch_disposition", Table: "watch_disposition"},

@@ -11,6 +11,9 @@ import (
 // 所有命名查询都返回键和可选 JSON 投影。只取标识的反查不装载聚合，
 // 最近 N 项的排除集合只展开一次，不占用数量随输入增长的绑定参数。
 var lookups = map[string]string{
+	"outboxState": "SELECT key,value FROM outbox WHERE state=? ORDER BY key",
+	// 只数到上限，窗口内历史记录再多也不影响准入成本。
+	"autoWindow": "SELECT key,NULL FROM outbox WHERE auto_at>? AND auto_at<=? LIMIT 1 OFFSET ?",
 	"pending":    "SELECT key,value FROM watch_thread WHERE closed IS NULL AND ready=1 ORDER BY ordinal",
 	"evaluating": "SELECT key,value FROM watch_thread WHERE eval_id>'' ORDER BY eval_id",
 	"eval":       "SELECT key,value FROM watch_thread WHERE eval_id>'' AND eval_id=? LIMIT 1",

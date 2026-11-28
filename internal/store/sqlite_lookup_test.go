@@ -13,6 +13,7 @@ func TestLookupPlans(t *testing.T) {
 	const workKey = "INDEX sqlite_autoindex_watch_work_1 (key=?)"
 	const inputKey = "PRIMARY KEY (work_key=? AND input_id=?)"
 	expected := map[string][]string{
+		"outboxState": {"INDEX outbox_state"}, "autoWindow": {"INDEX outbox_auto_at"},
 		"pending": {"INDEX thread_pending"}, "evaluating": {"INDEX thread_eval"}, "eval": {"INDEX thread_eval"},
 		"open": {"INDEX watch_work_active"}, "recent": {"INDEX work_recent"}, "origin": {"INDEX work_origin"},
 		"subscriptions": {"INDEX subscription_work"}, "threadKeys": {"INDEX link_trigger"}, "triggerIDs": {"INDEX link_thread"},
@@ -29,6 +30,7 @@ func TestLookupPlans(t *testing.T) {
 	for _, collection := range []string{"watch_trigger", "watch_disposition", "watch_thread", "watch_work", "watch_decision"} {
 		t.Run(collection, func(t *testing.T) { checkPlan(t, s, manyQuery(collection), "INDEX sqlite_autoindex_"+collection) })
 	}
+	checkPlan(t, s, getQuery("outbox"), "INDEX sqlite_autoindex_outbox_1 (key=?)")
 	checkPlan(t, s, getQuery("watch_reply_status"), "INDEX sqlite_autoindex_watch_reply_status_1 (key=?)")
 	checkPlan(t, s, effectByKey, "INDEX sqlite_autoindex_watch_effect_1 (kind=? AND key=?)")
 	checkPlan(t, s, inboxDelete, "INDEX sqlite_autoindex_watch_inbox_1 (id=?)")

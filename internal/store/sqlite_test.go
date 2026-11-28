@@ -110,6 +110,7 @@ func TestSchemaV1(t *testing.T) {
 		"watch_inbox":          {"id", "value", "at", "seq"},
 		"watch_effect":         {"kind", "key", "value", "seq", "generation", "attempts", "error", "due", "since", "failure_order"},
 		"effect_count":         {"kind", "waiting"},
+		"outbox":               {"key", "value", "state", "auto_at"},
 		"alarm_state":          {"key", "value"},
 		"ext_state":            {"key", "value"},
 	} {

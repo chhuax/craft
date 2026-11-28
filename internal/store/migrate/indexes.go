@@ -9,6 +9,8 @@ import (
 // 索引和文档由同一条语句维护，PutMany、保存点和直接导入文档也具备相同语义。
 func createIndexes(tx *sql.Tx) error {
 	for _, ddl := range []string{
+		"CREATE INDEX outbox_state ON outbox(state,key)",
+		"CREATE INDEX outbox_auto_at ON outbox(auto_at) WHERE auto_at IS NOT NULL",
 		"CREATE INDEX thread_pending ON watch_thread(closed,ordinal) WHERE closed IS NULL AND ready=1",
 		"CREATE INDEX thread_eval ON watch_thread(eval_id) WHERE eval_id>''",
 		"CREATE INDEX work_recent ON watch_work(ended,created DESC,ordinal DESC) WHERE ended IS NULL",
