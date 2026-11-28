@@ -18,6 +18,11 @@ func Run(t *testing.T, factory func(t *testing.T) engine.Store) {
 	}{
 		{"对象状态事实", threadStatus},
 		{"对象描述与补丁", threadMeta},
+		{"接收与未认领路由", receiveUnclaimed},
+		{"接收参数错误", receiveInvalid},
+		{"订阅到达与恢复", receiveReached},
+		{"授权撤销的跟进事件", receiveRevokedFollowup},
+		{"多对象分发、回滚与重放", receiveAtomic},
 	} {
 		t.Run(tc.name, func(t *testing.T) { tc.check(t, factory(t)) })
 	}
