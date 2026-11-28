@@ -19,7 +19,10 @@ func TestJob(t *testing.T) {
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if state, err := syscall.WaitForSingleObject(h, 0); err != nil || state != syscall.WAIT_OBJECT_0 {
+	// 作业对象的终止是异步的：TerminateJobObject 发出后，进程对象要过几毫秒才变成已触发状态，
+	// 所以不能用超时 0 立刻问，否则会偶发 WAIT_TIMEOUT（258）。这里仍然要求它确实被终止，
+	// 只是给一个有上限的等待。
+	if state, err := syscall.WaitForSingleObject(h, 5000); err != nil || state != syscall.WAIT_OBJECT_0 {
 		t.Fatal(state, err)
 	}
 }
