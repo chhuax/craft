@@ -60,7 +60,8 @@ func seedBench(b *testing.B, s engine.Store, count int) *engine.Engine {
 func BenchmarkRepositoryCommands(b *testing.B) {
 	for _, backend := range []string{"Memory", "SQLite"} {
 		for _, count := range []int{100, 10000} {
-			for _, cmd := range []string{"Receive", "EvaluateDue", "DecideAccept", "ThreadClosed", "StopWork"} {
+			for _, cmd := range []string{"Receive", "EvaluateDue", "DecideAccept", "ThreadClosed", "StopWork",
+				"PrepareDelivery", "InputsDelivered", "Report", "Reply", "Answer"} {
 				b.Run(fmt.Sprintf("%s/Threads_%d/%s", backend, count, cmd), func(b *testing.B) {
 					var s engine.Store
 					if backend == "SQLite" {
@@ -73,8 +74,10 @@ func BenchmarkRepositoryCommands(b *testing.B) {
 					switch cmd {
 					case "Receive", "ThreadClosed", "StopWork":
 						benchSubscribed(b, s, e, cmd)
-					default:
+					case "EvaluateDue", "DecideAccept":
 						benchAssessment(b, s, e, cmd, count)
+					default:
+						benchAssignment(b, s, e, cmd)
 					}
 				})
 			}
@@ -194,5 +197,80 @@ func benchAssessment(b *testing.B, s engine.Store, e *engine.Engine, cmd string,
 			b.Fatalf("接单结果 %+v, %v", d, err)
 		}
 		previous = d.WorkID
+	}
+}
+
+func benchAssignment(b *testing.B, s engine.Store, e *engine.Engine, cmd string) {
+	ctx := b.Context()
+	const assignment = "run"
+	ref := benchRef(0)
+	origin := engine.Trigger{ID: "origin", Human: true, At: benchAt, Threads: []engine.ThreadRef{ref},
+		Channel: &engine.ChannelRef{Source: "feed", Thread: json.RawMessage(`"room"`)}}
+	w := engine.Work{ID: benchWorkID(0), CreatedAt: benchAt, Attention: &engine.Question{ID: "q"},
+		Assignments: []engine.Assignment{{ID: assignment, State: engine.AssignmentRunning}},
+		Origin:      engine.Origin{TriggerID: origin.ID}, Follows: []engine.Follow{{Own: true, Thread: engine.ThreadKey(ref)}}}
+	for i := range 510 {
+		id := fmt.Sprintf("input-%04d", i)
+		in := engine.WorkInput{ID: id, TriggerID: id, Kind: "trigger", At: benchAt}
+		if i < 500 {
+			in.DeliveredTo, in.DeliveredAt = assignment, benchAt
+			in.ReadAt = engine.ReadTime{Present: true, Time: benchAt}
+		} else {
+			w.Undelivered = append(w.Undelivered, id)
+		}
+		w.Inputs = append(w.Inputs, in)
+	}
+	if cmd == "InputsDelivered" {
+		w.DeliveryBatch = w.Undelivered
+	}
+	benchCheck(b, s.Atomic(ctx, func(u engine.Unit) error { return u.PutTrigger(origin) }))
+	for round := 0; b.Loop(); round++ {
+		b.StopTimer()
+		text := strconv.Itoa(round)
+		benchCheck(b, s.Atomic(ctx, func(u engine.Unit) error {
+			// 确认消息按起源事件去重，回答按正文去重，每轮都应实际提交。
+			if cmd == "Reply" {
+				origin.ID = "origin-" + text
+				w.Origin.TriggerID = origin.ID
+				if err := u.PutTrigger(origin); err != nil {
+					return err
+				}
+			}
+			return u.PutWork(w)
+		}))
+		b.StartTimer()
+		switch cmd {
+		case "PrepareDelivery":
+			marker, err := e.PrepareDelivery(ctx, w.ID, assignment, w.Undelivered)
+			if err != nil || marker == "" {
+				b.Fatalf("准备批次 %q, %v", marker, err)
+			}
+		case "InputsDelivered":
+			benchCheck(b, e.InputsDelivered(ctx, w.ID, assignment, w.Undelivered, true, benchAt))
+		case "Report":
+			got, err := e.Report(ctx, w.ID, assignment, engine.WorkerReport{State: engine.Progress, Summary: "核对进度"})
+			if err != nil || got == nil {
+				b.Fatalf("回报未保存, %v", err)
+			}
+		case "Reply":
+			got, err := e.Reply(ctx, engine.ReplyRequest{Kind: engine.ReplyAcknowledgement, WorkID: w.ID, TriggerID: origin.ID, Text: "已收到"})
+			if err != nil || got.Reused || got.Status != engine.ReplyPending {
+				b.Fatalf("回复未入队 %+v, %v", got, err)
+			}
+		case "Answer":
+			got, err := e.Answer(ctx, w.ID, text)
+			if err != nil || len(got.Inputs) != len(w.Inputs)+1 {
+				b.Fatalf("回答未送入 Work, %v", err)
+			}
+		}
+	}
+	if cmd == "InputsDelivered" {
+		benchCheck(b, s.Read(ctx, func(r engine.Reader) error {
+			got, err := r.GetDeliveryWindow(w.ID, w.Undelivered)
+			if err == nil && (got == nil || len(got.Head) != 0 || got.Inputs[w.Undelivered[0]].DeliveredTo != assignment) {
+				b.Fatal("队首批次未确认")
+			}
+			return err
+		}))
 	}
 }
