@@ -253,8 +253,13 @@ func runBound(args []string, version string, stdout, stderr io.Writer, getenv fu
 func failure(w io.Writer, asJSON bool, err error) int {
 	code, exit := "internalError", 1
 	detail := map[string]string{}
+	message := err.Error()
 	if e, ok := errors.AsType[*engine.UserError](err); ok {
 		code, exit = "refused", 5
+		// 引擎的拒绝是给人看的结论，只显示它自己的话；事务与命令层层包装出来的前缀对用户是噪声，
+		// 但排查时有用，所以放进 detail.chain 而不是丢掉。
+		message = e.Error()
+		detail["chain"] = clipText(err.Error())
 		if engine.IsMissing(err) {
 			code = "missing"
 		}
@@ -273,9 +278,9 @@ func failure(w io.Writer, asJSON bool, err error) int {
 		}
 	}
 	if asJSON {
-		err = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]any{"code": code, "message": clipText(err.Error()), "detail": detail}})
+		err = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]any{"code": code, "message": clipText(message), "detail": detail}})
 	} else {
-		_, err = fmt.Fprintln(w, clipText(err.Error()))
+		_, err = fmt.Fprintln(w, clipText(message))
 	}
 	if err != nil {
 		return 1

@@ -21,8 +21,9 @@ type reply struct {
 	Payload  map[string]json.RawMessage
 	Evidence []json.RawMessage
 	Error    struct {
-		Code   string
-		Detail map[string]string
+		Code    string
+		Message string
+		Detail  map[string]string
 	}
 }
 
@@ -96,8 +97,13 @@ func TestCommandsWithoutDaemon(t *testing.T) {
 		{[]string{"watch", "dismiss", "missing"}, "unknownProblem"},
 		{[]string{"watch", "reevaluate", "missing"}, "unknownTrigger"},
 	} {
-		if got := command(t, home, 5, tc.args...).Error.Detail["code"]; got != tc.code {
+		r := command(t, home, 5, tc.args...)
+		if got := r.Error.Detail["code"]; got != tc.code {
 			t.Errorf("错误码 %q", got)
+		}
+		// 给人看的只有引擎自己的结论；事务与命令层层包装的前缀放进 detail.chain，排查时才看。
+		if strings.Contains(r.Error.Message, "SQLite") || r.Error.Detail["chain"] == "" || r.Error.Message == r.Error.Detail["chain"] {
+			t.Errorf("拒绝消息 %q 带了内部包装，或没有保留 chain %q", r.Error.Message, r.Error.Detail["chain"])
 		}
 	}
 }
