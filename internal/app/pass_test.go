@@ -369,3 +369,46 @@ func TestDrainDropsReservedSourceRow(t *testing.T) {
 		return nil
 	}))
 }
+
+// CLI 在自己的进程里改策略并提交，daemon 的快照必须跟上，否则要重启才生效。
+// 同时验证 paused 这类「不进版本」的字段也会被重读——只比版本是发现不了它的。
+func TestPassReloadsExternallyChangedPolicy(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "db")
+		db, external := inboxDB(t, path), inboxDB(t, path)
+		ctx := t.Context()
+		clock := &passClock{}
+		r, err := NewRuntime(db, clock, benchScope{}, nil, nil)
+		checkErr(t, err)
+		checkErr(t, r.Start(ctx, engine.Settings{}, nil))
+		defer func() { checkErr(t, r.Stop(t.Context())) }()
+		synctest.Wait()
+		before := r.policy.Load()
+
+		// 第二条物理连接上的另一个 Runtime 模拟 CLI：同样走 ApplyPolicy，不启动 Pass。
+		cli, err := NewRuntime(external, alarm.RealClock{}, benchScope{}, nil, nil)
+		checkErr(t, err)
+		changed := engine.Settings{AllowedSenders: []engine.ActorRef{{Source: "chat", ID: "u1"}}}
+		checkErr(t, cli.ApplyPolicy(ctx, changed, nil))
+		want, err := engine.NewPolicy(changed, nil)
+		checkErr(t, err)
+		if r.policy.Load().Version() != before.Version() {
+			t.Fatal("没到轮询时刻，快照不应已变")
+		}
+		clock.advance(2 * time.Second)
+		synctest.Wait()
+		if got := r.policy.Load(); got.Version() != want.Version() {
+			t.Fatalf("外部改了放行发送人，daemon 的策略版本仍是 %s，期望 %s", got.Version(), want.Version())
+		}
+
+		// paused 不进版本：版本不变，但快照里的 Paused 必须变。
+		paused := changed
+		paused.Paused = true
+		checkErr(t, cli.ApplyPolicy(ctx, paused, nil))
+		clock.advance(2 * time.Second)
+		synctest.Wait()
+		if got := r.policy.Load(); got.Version() != want.Version() || !got.Paused() {
+			t.Fatalf("外部暂停后 daemon 仍未暂停：paused=%v version=%s", got.Paused(), got.Version())
+		}
+	})
+}

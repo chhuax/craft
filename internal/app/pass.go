@@ -36,6 +36,10 @@ func (r *Runtime) loop(ctx context.Context, version int64) {
 				slog.Error("检查外部写入失败", "error", err)
 			} else if current != version {
 				version = current
+				// 外部提交里可能有策略变更（CLI 的 policy set），先重读再跑 Pass，这一轮就按新策略准入。
+				if err := r.refreshPolicy(round); err != nil {
+					slog.Error("外部写入后重读策略失败，沿用旧策略", "error", err)
+				}
 				r.Request()
 			}
 		}

@@ -98,6 +98,33 @@ func (r *Runtime) applyPolicy(ctx context.Context, change func(savedPolicy) (eng
 	return nil
 }
 
+// refreshPolicy 把别的进程（例如 CLI 的 `policy set`）已经提交的策略发布进本进程的快照。
+//
+// 为什么需要：策略快照只存在于内存里，CLI 在自己的进程里改设置并提交，daemon 的 data_version
+// 轮询只会唤醒 Pass，不会重读策略；不重读的话 daemon 会一直按旧策略准入，直到重启。
+//
+// 为什么用「不写任何东西的写事务」而不是只读事务：发布必须和本进程自己的 ApplyPolicy 的发布按提交顺序
+// 串行，否则这里读到旧版、却在新版发布之后才存进去，快照就回退了。WriteAndPublish 的 publish 在提交后、
+// 仍持有写连接时执行，天然串行；事务里没有写入，所以没有 fsync，开销只是一次加锁。
+// 库里还没有已保存的策略时什么也不发布，以免用默认策略覆盖启动时装入的目录。
+func (r *Runtime) refreshPolicy(ctx context.Context) error {
+	var next engine.Policy
+	var found bool
+	err := r.repo.db.WriteAndPublish(ctx, func(tx *store.SQLiteTx) error {
+		saved, p, err := (CommandReader{&tx.SQLiteReader}).policy()
+		next, found = p, saved.Version != ""
+		return err
+	}, func() {
+		if found {
+			r.policy.Store(&next)
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("重读策略: %w", err)
+	}
+	return nil
+}
+
 // ErrInvalidSettings 区分无效的用户设置与数据库故障。
 var ErrInvalidSettings = errors.New("设置参数无效")
 
