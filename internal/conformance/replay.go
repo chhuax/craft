@@ -4,16 +4,18 @@ package conformance
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
-
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -35,13 +37,18 @@ type response struct {
 	header http.Header
 	body   []byte
 }
-type requestKey struct{ method, path, query string }
+
+type route struct {
+	method, path string
+	query        url.Values // nil 值表示该键必须存在，正常查询至少有一个值（可能是空串）。
+	rows         []response
+}
 
 type fixture struct {
-	provided  bool
-	responses map[requestKey][]response
-	config    json.RawMessage
-	expect    struct {
+	provided bool
+	routes   []route
+	config   json.RawMessage
+	expect   struct {
 		ThreadIDs []string `json:"threadIds"`
 		Lookback  struct {
 			Param string `json:"param"`
@@ -67,8 +74,9 @@ func readFixtureFile(path string, dst any) error {
 	return nil
 }
 
-func loadFixture(dir string) (fixture, error) {
-	f := fixture{responses: map[requestKey][]response{}, config: json.RawMessage(`{}`)}
+// 同一次验收共用运行起点；重放响应即使跨过毫秒边界也必须有相同的事件标识。
+func loadFixture(dir string, now time.Time) (fixture, error) {
+	f := fixture{config: json.RawMessage(`{}`)}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return f, nil
@@ -82,11 +90,17 @@ func loadFixture(dir string) (fixture, error) {
 		case "config.json":
 			f.provided = true
 			err = readFixtureFile(path, &f.config)
+			if err == nil {
+				f.config, err = expandTimes(f.config, now)
+				if err != nil {
+					return f, fmt.Errorf("%s: %w", path, err)
+				}
+			}
 		case "expect.json":
 			f.provided = true
 			err = readFixtureFile(path, &f.expect)
 		case "http":
-			err = f.loadHTTP(path)
+			err = f.loadHTTP(path, now)
 		}
 		if err != nil {
 			return f, err
@@ -95,7 +109,7 @@ func loadFixture(dir string) (fixture, error) {
 	return f, nil
 }
 
-func (f *fixture) loadHTTP(dir string) error {
+func (f *fixture) loadHTTP(dir string, now time.Time) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
@@ -120,7 +134,7 @@ func (f *fixture) loadHTTP(dir string) error {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 		for i, row := range rows {
-			if err := f.add(row); err != nil {
+			if err := f.add(row, now); err != nil {
 				return fmt.Errorf("%s 第 %d 条: %w", path, i+1, err)
 			}
 		}
@@ -163,10 +177,96 @@ func queryValues(raw json.RawMessage) (url.Values, error) {
 	if err := jsonv2.Unmarshal(raw, &fields); err != nil {
 		return nil, err
 	}
-	return stringValues(fields)
+	values, err := stringValues(fields)
+	if err != nil {
+		return nil, err
+	}
+	for name, parts := range values {
+		switch {
+		case len(parts) == 0:
+			delete(values, name) // 与完整查询串的 Encode 行为一致。
+		case fields[name][0] == '"' && parts[0] == "*":
+			values[name] = nil
+		}
+	}
+	return values, nil
 }
 
-func (f *fixture) add(row recording) error {
+var fixtureTime = regexp.MustCompile(`\$\{CRAFT_FIXTURE_NOW(?:[+-][^}]*)?(?:\}|$)`)
+
+func expandTimeString(s string, now time.Time) (string, error) {
+	var out strings.Builder
+	start := 0
+	for _, span := range fixtureTime.FindAllStringIndex(s, -1) {
+		tail := strings.TrimPrefix(s[span[0]:span[1]], "${CRAFT_FIXTURE_NOW")
+		offset, closed := strings.CutSuffix(tail, "}")
+		if !closed {
+			return "", errors.New("时间占位符缺少右花括号")
+		}
+		at := now
+		if offset != "" {
+			delta, err := time.ParseDuration(offset)
+			if err != nil {
+				return "", fmt.Errorf("时间占位符偏移 %q 无效: %w", offset, err)
+			}
+			at = at.Add(delta)
+		}
+		out.WriteString(s[start:span[0]])
+		out.WriteString(at.UTC().Format("2006-01-02T15:04:05.000Z"))
+		start = span[1]
+	}
+	if start == 0 {
+		return s, nil
+	}
+	out.WriteString(s[start:])
+	return out.String(), nil
+}
+
+// 只替换字符串值。保留字段名、数字精度以及正文的原始排版，错误定位到 JSON 路径。
+func expandTimes(raw json.RawMessage, now time.Time) (json.RawMessage, error) {
+	d := jsontext.NewDecoder(bytes.NewReader(raw))
+	var out bytes.Buffer
+	start := int64(0)
+	for {
+		kind, count := d.StackIndex(d.StackDepth())
+		if d.PeekKind() != '"' || kind == '{' && count%2 == 0 {
+			if _, err := d.ReadToken(); err == io.EOF {
+				break
+			} else if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		value, err := d.ReadValue()
+		if err != nil {
+			return nil, err
+		}
+		var s string
+		if err := json.Unmarshal(value, &s); err != nil {
+			return nil, err
+		}
+		replaced, err := expandTimeString(s, now)
+		if err != nil {
+			return nil, fmt.Errorf("JSON 路径 %q（字节 %d）: %w", d.StackPointer(), d.InputOffset()-int64(len(value))+1, err)
+		}
+		if replaced != s {
+			out.Write(raw[start : d.InputOffset()-int64(len(value))])
+			quoted, err := json.Marshal(replaced)
+			if err != nil {
+				return nil, err
+			}
+			out.Write(quoted)
+			start = d.InputOffset()
+		}
+	}
+	if start == 0 {
+		return raw, nil
+	}
+	out.Write(raw[start:])
+	return out.Bytes(), nil
+}
+
+func (f *fixture) add(row recording, now time.Time) error {
 	if row.Method == "" || !strings.HasPrefix(row.Path, "/") || row.Status < 200 || row.Status > 599 || row.Body == nil {
 		return errors.New("需要 method、绝对 path、最终响应 status 和 body")
 	}
@@ -174,11 +274,20 @@ func (f *fixture) add(row recording) error {
 	if err != nil {
 		return fmt.Errorf("query: %w", err)
 	}
+	for k, v := range row.Headers {
+		row.Headers[k], err = expandTimes(v, now)
+		if err != nil {
+			return fmt.Errorf("headers[%q]: %w", k, err)
+		}
+	}
 	headers, err := stringValues(row.Headers)
 	if err != nil {
 		return fmt.Errorf("headers: %w", err)
 	}
-	body := []byte(row.Body)
+	body, err := expandTimes(row.Body, now)
+	if err != nil {
+		return fmt.Errorf("body: %w", err)
+	}
 	if body[0] == '"' {
 		var str string
 		if err := jsonv2.Unmarshal(body, &str); err != nil {
@@ -186,10 +295,39 @@ func (f *fixture) add(row recording) error {
 		}
 		body = []byte(str)
 	}
-	key := requestKey{row.Method, row.Path, query.Encode()}
 	f.provided = true
-	f.responses[key] = append(f.responses[key], response{row.Status, http.Header(headers), body})
+	r := response{row.Status, http.Header(headers), body}
+	for i := range f.routes {
+		route := &f.routes[i]
+		if route.method == row.Method && route.path == row.Path && maps.EqualFunc(route.query, query, slices.Equal[[]string]) {
+			route.rows = append(route.rows, r)
+			return nil
+		}
+	}
+	f.routes = append(f.routes, route{row.Method, row.Path, query, []response{r}})
 	return nil
+}
+
+func (f fixture) match(method, path string, actual url.Values) int {
+	best, wildcards := -1, len(actual)+1
+	for i, route := range f.routes {
+		if route.method != method || route.path != path || len(route.query) != len(actual) {
+			continue
+		}
+		count := 0
+		matches := maps.EqualFunc(route.query, actual, func(want, got []string) bool {
+			if want == nil {
+				count++
+				return true
+			}
+			return slices.Equal(want, got)
+		})
+		// 优先使用精确字段最多的录制；同等具体时按文件及数组顺序选取。
+		if matches && count < wildcards {
+			best, wildcards = i, count
+		}
+	}
+	return best
 }
 
 // 在 JSON 字符串解码之后替换，转义拼写和嵌套数组也生效，数字按原精度往返。
@@ -226,7 +364,7 @@ type replay struct {
 	f         fixture
 	trace     *transcript
 	mu        sync.Mutex
-	positions map[requestKey]int
+	positions map[int]int
 	gate      *httpGate
 }
 
@@ -237,7 +375,7 @@ type httpGate struct {
 }
 
 func startReplay(f fixture, tr *transcript, timeout time.Duration) (*replay, error) {
-	r := &replay{f: f, trace: tr, positions: map[requestKey]int{}}
+	r := &replay{f: f, trace: tr, positions: map[int]int{}}
 	// 使用显式 IPv4 回环，避免测试工具默认监听器在 IPv4 不可用时切换到其他地址。
 	l, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -285,16 +423,15 @@ func (r *replay) serve(w http.ResponseWriter, q *http.Request) {
 		return
 	}
 	values, err := url.ParseQuery(q.URL.RawQuery)
-	key := requestKey{q.Method, q.URL.Path, values.Encode()}
-	r.mu.Lock()
-	rows := r.f.responses[key]
-	if len(rows) == 0 || err != nil {
-		r.mu.Unlock()
+	key := r.f.match(q.Method, q.URL.Path, values)
+	if key < 0 || err != nil {
 		r.trace.http(q, 599, false, "未匹配录制响应")
 		http.Error(w, "未匹配 fixture", 599)
 		return
 	}
 	// 同一键的多条录制按文件及数组顺序消费，最后一条可重复；每轮从第一条重放。
+	r.mu.Lock()
+	rows := r.f.routes[key].rows
 	i := r.positions[key]
 	row := rows[i]
 	r.positions[key] = min(i+1, len(rows)-1)

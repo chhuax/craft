@@ -136,7 +136,7 @@ func Run(ctx context.Context, dir string, opt Options) []Check {
 	if opt.Fixtures == "" {
 		opt.Fixtures = filepath.Join(ext.Dir, "testdata", "conformance")
 	}
-	f, err := loadFixture(opt.Fixtures)
+	f, err := loadFixture(opt.Fixtures, s.now)
 	if err != nil {
 		s.r.fail(httpReplay, "读取 fixture: %v", err)
 		return s.r
