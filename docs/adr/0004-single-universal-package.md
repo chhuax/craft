@@ -57,13 +57,21 @@
   - Codex 每次升级可能重新审阅 hook（二进制在插件里，属于「捆绑的脚本」的改动——**这是对文档的推断，没有实测**）。旧项目的 Python 脚本同样在插件里，已接受这个代价。
   - macOS 经浏览器下载的二进制会被 Gatekeeper 拦；经 git 克隆（两个宿主的安装方式）不带隔离属性，不受影响。长期仍要做签名与公证。Windows 同理有 SmartScreen。
 
-## 待验证（实现 M6/M7 时逐项实测，结论写进 `hosts/README.md`）
+## 验证记录
 
-1. **Windows 上只有 PowerShell、没有 Git Bash** 的 Claude Code：hook 里的 `sh` 找不到，该 hook 会被跳过；核心功能（skill 调 `craft`）不受影响，但要确认 `craft.exe` 在 PowerShell 里确实按 PATHEXT 被解析到。
-2. **Codex 升级是否重新审阅 hook**（改动的是二进制而非 hook 定义时）。
-3. **可执行位**经 Claude Code 与 Codex 的 git 安装后是否保留；若不保留，启动器要能自举（`chmod +x` 后 exec），或改用 `sh` 显式调用。
-4. Claude Code 与 Codex 的 **SessionStart 输出字段**（`hookSpecificOutput.additionalContext`）与 hook 信任流程，用真实宿主跑一遍。
-5. Codex 对 `git-subdir`/`url` 来源安装这个目录布局（含 `.claude-plugin/` 并存）是否有问题。
-6. 包体积随功能增长后是否触及任何宿主的限制。
+### 已实测（2026-11-28，Claude Code 2.1.330，macOS arm64，隔离的配置目录，样例包含 `.claude-plugin/` 与 `.codex-plugin/` 并存、sh 启动器和真实二进制）
 
-`claude plugin validate` 可在本机直接校验 Claude Code 一侧的清单，是第一个要跑的检查。
+| 项 | 结果 |
+|---|---|
+| `claude plugin validate` | 通过。识别出 `hooks`、`skills`、`bin: craft`；并存的 `.codex-plugin/` 目录不引起任何警告。唯一的「问题」是 README 与 LICENSE 缺失，那是提交到 Anthropic 官方目录才要求的，包里仍应带上 |
+| 本地路径 marketplace 安装 | 成功，缓存里 `bin/craft` 与各系统二进制保持 `755` |
+| **git 仓库来源安装**（`source: url` + `file://`，即分发仓库的真实路径） | 成功，**可执行位保留**（git 记录 `100755`，缓存里仍是 `rwxr-xr-x`） |
+| **真实会话里的裸命令** | `command -v craft` 解析到 `<插件根>/bin/craft`，`craft version` 经 sh 启动器转交 `darwin-arm64` 二进制并输出版本。**skill 里直接写 `craft ...` 在 Claude Code 上可用** |
+| SessionStart hook | 触发；`CLAUDE_PLUGIN_ROOT` 与 `CLAUDE_PLUGIN_DATA` 按文档注入；hook 内可经启动器调用二进制 |
+
+### 仍待验证（实现 M6/M7 时逐项实测，结论写进 `hosts/README.md`）
+
+1. **Windows 上只有 PowerShell、没有 Git Bash** 的 Claude Code：hook 里的 `sh` 找不到，该 hook 会被跳过；核心功能（skill 调 `craft`）不受影响，但要确认 `craft.exe` 在 PowerShell 里确实按 PATHEXT 被解析到，以及 Git Bash 下 `craft` 能转交 `craft.exe`。需要 Windows 环境。
+2. **Codex** 一侧全部未实测：升级后是否重新审阅 hook（改动的是二进制而非 hook 定义时）；`git-subdir`/`url` 来源安装这个目录布局；可执行位是否保留；`commandWindows`；SessionStart 绝对路径注入。
+3. SessionStart 的 `hookSpecificOutput.additionalContext` 输出（Claude Code 与 Codex），用真实宿主跑一遍。
+4. 包体积随功能增长后是否触及任何宿主的限制。
